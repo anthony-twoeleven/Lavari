@@ -270,7 +270,7 @@ else
                                     <div class="lv-canvas-item @(el.Id == _selectedElementId ? "selected" : "")"
                                          style="left:@(leftPct)%;top:@(topPct)%;width:@(wPct)%;height:@(hPct)%;z-index:@el.ZIndex"
                                          @onclick="() => _selectedElementId = el.Id">
-                                        @if (el.ElementType == "Image" && el.ImageAssetId.HasValue)
+                                        @if (el.ElementType == MoodBoardElementType.Image && el.ImageAssetId.HasValue)
                                         {
                                             <img src="/api/images/@el.ImageAssetId/content" alt="@(el.Caption ?? "Mood board image")" style="width:100%;height:100%;object-fit:contain" />
                                         }
@@ -291,7 +291,7 @@ else
                                         {
                                             <tr>
                                                 <td>
-                                                    @if (el.ElementType == "Text")
+                                                    @if (el.ElementType == MoodBoardElementType.Text)
                                                     {
                                                         <input class="lv-input" value="@el.TextContent" @oninput="e => UpdateEl(el.Id, x => x with { TextContent = e.Value?.ToString() })" />
                                                     }
@@ -318,8 +318,8 @@ else
     {
         <LvCard Title="Quotes &amp; Invoices" Subtitle="Manual lines, job items, billable time or total-only — with Word .docx template &amp; PDF exports">
             <HeaderActions>
-                <LvButton Small="true" OnClick='() => OpenNewDocModal("Quote")'>+ New Quote</LvButton>
-                <LvButton Variant="tonal" Small="true" OnClick='() => OpenNewDocModal("Invoice")'>+ New Invoice</LvButton>
+                <LvButton Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Quote)">+ New Quote</LvButton>
+                <LvButton Variant="tonal" Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Invoice)">+ New Invoice</LvButton>
             </HeaderActions>
             <ChildContent>
                 <div class="lv-table-wrap">
@@ -336,7 +336,7 @@ else
                                     <td class="lv-row">
                                         <LvButton Variant="tonal" Small="true" OnClick="() => DownloadDocxAsync(doc)">Word .docx</LvButton>
                                         <LvButton Small="true" OnClick="() => DownloadPdfAsync(doc)">Save PDF</LvButton>
-                                        @if (doc.DocumentType == "Quote")
+                                        @if (doc.DocumentType == FinancialDocumentType.Quote)
                                         {
                                             <LvButton Variant="outlined" Small="true" OnClick="() => ConvertToInvoiceAsync(doc.Id)">To Invoice</LvButton>
                                         }
@@ -707,7 +707,7 @@ else
     private bool _showCanvasImagePicker;
 
     private bool _showNewDocModal;
-    private string _newDocType = "Quote";
+    private FinancialDocumentType _newDocType = FinancialDocumentType.Quote;
     private string _newDocMode = "LineCalculated";
     private string _newDocManualTotal = "0.00";
     private string _newDocLineTitle = string.Empty;
@@ -815,7 +815,7 @@ else
     private async Task RequestModifyAsync()
     {
         _error = null;
-        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = LockableRecordType.Job, RecordId = JobId });
         if (!resp.IsSuccess) { _error = resp.Error; return; }
         _lockStatus = resp.Data;
         _notice = _lockStatus!.IsHeldByCurrentSession ? "Exclusive Modify lock acquired." : $"Added to FIFO queue at position {_lockStatus.QueuePosition}.";
@@ -823,7 +823,7 @@ else
 
     private async Task ClaimTurnAsync()
     {
-        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/claim", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/claim", new EditLockActionRequest { RecordType = LockableRecordType.Job, RecordId = JobId });
         if (!resp.IsSuccess) { _error = resp.Error; return; }
         await LoadAllAsync();
         _notice = "Turn claimed and latest version loaded.";
@@ -831,7 +831,7 @@ else
 
     private async Task ReleaseLockAsync()
     {
-        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId, LeaseId = _lockStatus?.LeaseId, FencingVersion = _lockStatus?.FencingVersion });
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = LockableRecordType.Job, RecordId = JobId, LeaseId = _lockStatus?.LeaseId, FencingVersion = _lockStatus?.FencingVersion });
         if (!resp.IsSuccess) { _error = resp.Error; return; }
         _lockStatus = resp.Data;
         _notice = "Edit lock released.";
@@ -839,7 +839,7 @@ else
 
     private async Task CancelQueueAsync()
     {
-        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/cancel-queue", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/cancel-queue", new EditLockActionRequest { RecordType = LockableRecordType.Job, RecordId = JobId });
         if (resp.IsSuccess) _lockStatus = resp.Data;
     }
 
@@ -1095,7 +1095,7 @@ else
         _canvasElements.Add(new MoodBoardElementDto
         {
             Id = Guid.NewGuid(),
-            ElementType = "Text",
+            ElementType = MoodBoardElementType.Text,
             TextContent = "Room concept notes",
             FontSizePx = 28,
             TextColorHex = _selectedCanvas?.Branding.TextColorHex ?? "#1F1B16",
@@ -1112,7 +1112,7 @@ else
         _canvasElements.Add(new MoodBoardElementDto
         {
             Id = Guid.NewGuid(),
-            ElementType = "Image",
+            ElementType = MoodBoardElementType.Image,
             ImageAssetId = img.Id,
             Caption = img.Title,
             FontSizePx = 16,
@@ -1181,7 +1181,7 @@ else
         => double.TryParse(val?.ToString(), out var d) ? d : fallback;
 
     // --- Quotes & Invoices ---
-    private void OpenNewDocModal(string docType)
+    private void OpenNewDocModal(FinancialDocumentType docType)
     {
         _newDocType = docType;
         _newDocMode = "LineCalculated";
@@ -1209,7 +1209,7 @@ else
                     {
                         lines.Add(new SaveFinancialDocumentLineInput
                         {
-                            LineSourceType = "JobLineItem",
+                            LineSourceType = FinancialLineSourceType.JobLineItem,
                             SourceEntityId = li.Id,
                             SourceEntityVersion = li.ConcurrencyToken,
                             Title = li.Title,
@@ -1230,7 +1230,7 @@ else
                 var disc = Formatting.ParseMoneyInput(string.IsNullOrWhiteSpace(_newDocDiscount) ? "0" : _newDocDiscount, _job!.DefaultCurrency);
                 if (disc.Cents > 0)
                 {
-                    adjs.Add(new SaveFinancialDocumentAdjustmentInput { AdjustmentType = "Discount", Description = "Discount", AmountCents = disc.Cents, IsPreTax = true });
+                    adjs.Add(new SaveFinancialDocumentAdjustmentInput { AdjustmentType = FinancialAdjustmentType.Discount, Description = "Discount", AmountCents = disc.Cents, IsPreTax = true });
                 }
             }
 
@@ -1279,11 +1279,12 @@ else
     private async Task IssueDocumentAsync(FinancialDocumentDto doc)
     {
         _error = null;
-        var lResp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = doc.DocumentType, RecordId = doc.Id });
+        var lockRecType = doc.DocumentType == FinancialDocumentType.Quote ? LockableRecordType.Quote : LockableRecordType.Invoice;
+        var lResp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = lockRecType, RecordId = doc.Id });
         if (!lResp.IsSuccess || lResp.Data is null || !lResp.Data.IsHeldByCurrentSession) { _error = lResp.Error; return; }
 
         var resp = await Api.PostAsync<FinancialDocumentDto>($"/api/documents/{doc.Id}/issue?token={Uri.EscapeDataString(doc.ConcurrencyToken)}&leaseId={lResp.Data.LeaseId}&fencingVersion={lResp.Data.FencingVersion}");
-        await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = doc.DocumentType, RecordId = doc.Id, LeaseId = lResp.Data.LeaseId, FencingVersion = lResp.Data.FencingVersion });
+        await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = lockRecType, RecordId = doc.Id, LeaseId = lResp.Data.LeaseId, FencingVersion = lResp.Data.FencingVersion });
         if (!resp.IsSuccess) { _error = resp.Error; return; }
         await RefreshTabDataAsync();
         _notice = $"Issued {doc.DocumentNumber} with immutable Word and PDF snapshots.";

@@ -111,7 +111,7 @@ else
                         </div>
                         <p style="margin:4px 0">@n.Message</p>
                         <div class="lv-row">
-                            @if (n.RecordType == LockableRecordTypes.Job && n.RecordId.HasValue)
+                            @if (n.RecordType == LockableRecordType.Job && n.RecordId.HasValue)
                             {
                                 <a class="lv-btn lv-btn-filled lv-btn-sm" href="/jobs/@n.RecordId" @onclick="() => _showNotifications = false">Open Job</a>
                             }

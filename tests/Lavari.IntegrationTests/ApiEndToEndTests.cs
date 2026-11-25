@@ -115,7 +115,7 @@ public sealed class ApiEndToEndTests : IDisposable
         // 6. Acquire Modify lock -> update succeeds -> release lock
         var lockStatus = await (await client.PostAsJsonAsync("/api/locks/modify", new EditLockActionRequest
         {
-            RecordType = LockableRecordTypes.Job,
+            RecordType = LockableRecordType.Job,
             RecordId = createdJob.Id
         })).Content.ReadFromJsonAsync<EditLockStatusDto>(JsonOpts);
         Assert.True(lockStatus!.IsHeldByCurrentSession);
@@ -137,7 +137,7 @@ public sealed class ApiEndToEndTests : IDisposable
         var quote = await (await client.PostAsJsonAsync("/api/documents", new CreateFinancialDocumentRequest
         {
             JobId = createdJob.Id,
-            DocumentType = "Quote",
+            DocumentType = FinancialDocumentType.Quote,
             Lines = [new SaveFinancialDocumentLineInput { Title = "Custom Oak Table", QuantityMilli = 1000, UnitPriceCents = 320_000 }]
         })).Content.ReadFromJsonAsync<FinancialDocumentDto>(JsonOpts);
         Assert.NotNull(quote);

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using Lavari.Application.Abstractions;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Errors;
 using Lavari.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -117,6 +118,15 @@ public sealed class LavariDbContext : DbContext
                 else if (prop.ClrType == typeof(DateTimeOffset?))
                 {
                     prop.SetValueConverter(NullableUtcIsoConverter);
+                }
+                else
+                {
+                    var underlying = Nullable.GetUnderlyingType(prop.ClrType) ?? prop.ClrType;
+                    if (underlying.IsEnum && underlying.Namespace == typeof(FinancialDocumentType).Namespace)
+                    {
+                        var converterType = typeof(CaseInsensitiveEnumToStringConverter<>).MakeGenericType(underlying);
+                        prop.SetValueConverter((ValueConverter)Activator.CreateInstance(converterType)!);
+                    }
                 }
             }
         }
@@ -515,4 +525,10 @@ public sealed class LavariDbContext : DbContext
 
         return JsonSerializer.Serialize(dict, AuditJsonOptions);
     }
+
+    private sealed class CaseInsensitiveEnumToStringConverter<TEnum>()
+        : ValueConverter<TEnum, string>(
+            v => v.ToString(),
+            v => Enum.Parse<TEnum>(v, true))
+        where TEnum : struct, Enum;
 }

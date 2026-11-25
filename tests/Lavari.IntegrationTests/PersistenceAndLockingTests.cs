@@ -1,5 +1,6 @@
 using Lavari.Application.Abstractions;
 using Lavari.Application.Security;
+using Lavari.Contracts.Common;
 using Lavari.Contracts.Locking;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
@@ -68,8 +69,8 @@ public sealed class PersistenceAndLockingTests : IDisposable
         // Verify Quote and Invoice Word templates were seeded into private storage
         var seededTemplates = await db.DocumentTemplates.ToListAsync();
         Assert.Equal(2, seededTemplates.Count);
-        Assert.Contains(seededTemplates, t => t.DocumentType == "Invoice");
-        Assert.Contains(seededTemplates, t => t.DocumentType == "Quote");
+        Assert.Contains(seededTemplates, t => t.DocumentType == FinancialDocumentType.Invoice);
+        Assert.Contains(seededTemplates, t => t.DocumentType == FinancialDocumentType.Quote);
 
         // Verify physical delete is prohibited
         var client = new ClientEntity { Name = "Acme Design Co" };
@@ -140,29 +141,29 @@ public sealed class PersistenceAndLockingTests : IDisposable
 
         // User A clicks Modify -> acquires lock
         _actor.SwitchTo(userA.Id, "Designer A", "sess-a");
-        var statusA = await lockService.RequestModifyAsync(LockableRecordTypes.Job, job.Id);
+        var statusA = await lockService.RequestModifyAsync(LockableRecordType.Job, job.Id);
         Assert.True(statusA.IsHeldByCurrentSession);
         Assert.Equal(1, statusA.FencingVersion);
 
         // User B clicks Modify -> queued at position 1
         _actor.SwitchTo(userB.Id, "Designer B", "sess-b");
-        var statusB = await lockService.RequestModifyAsync(LockableRecordTypes.Job, job.Id);
+        var statusB = await lockService.RequestModifyAsync(LockableRecordType.Job, job.Id);
         Assert.False(statusB.IsHeldByCurrentSession);
         Assert.True(statusB.IsCurrentSessionQueued);
         Assert.Equal(1, statusB.QueuePosition);
 
         // User B cannot save while A holds lock
         await Assert.ThrowsAsync<ConflictServiceException>(() =>
-            lockService.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, job.Id, null, null));
+            lockService.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, job.Id, null, null));
 
         // User C clicks Modify -> queued at position 2
         _actor.SwitchTo(userC.Id, "Designer C", "sess-c");
-        var statusC = await lockService.RequestModifyAsync(LockableRecordTypes.Job, job.Id);
+        var statusC = await lockService.RequestModifyAsync(LockableRecordType.Job, job.Id);
         Assert.Equal(2, statusC.QueuePosition);
 
         // User A releases lock -> B is reserved and notified
         _actor.SwitchTo(userA.Id, "Designer A", "sess-a");
-        await lockService.ReleaseLeaseAsync(LockableRecordTypes.Job, job.Id, statusA.LeaseId, statusA.FencingVersion);
+        await lockService.ReleaseLeaseAsync(LockableRecordType.Job, job.Id, statusA.LeaseId, statusA.FencingVersion);
 
         _actor.SwitchTo(userB.Id, "Designer B", "sess-b");
         var notifsB = await lockService.GetNotificationsAsync(unreadOnly: true);
@@ -170,7 +171,7 @@ public sealed class PersistenceAndLockingTests : IDisposable
         Assert.Equal("edit_turn_ready", notifsB[0].Category);
 
         // User B claims turn -> becomes active with fencing version 2
-        var claimedB = await lockService.ClaimReservationAsync(LockableRecordTypes.Job, job.Id);
+        var claimedB = await lockService.ClaimReservationAsync(LockableRecordType.Job, job.Id);
         Assert.True(claimedB.IsHeldByCurrentSession);
         Assert.Equal(2, claimedB.FencingVersion);
 
@@ -180,7 +181,7 @@ public sealed class PersistenceAndLockingTests : IDisposable
         Assert.Equal(1, swept);
 
         _actor.SwitchTo(userC.Id, "Designer C", "sess-c");
-        var statusCAfterExpiry = await lockService.GetStatusAsync(LockableRecordTypes.Job, job.Id);
+        var statusCAfterExpiry = await lockService.GetStatusAsync(LockableRecordType.Job, job.Id);
         Assert.True(statusCAfterExpiry.IsReservedForCurrentSession);
     }
 

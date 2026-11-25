@@ -3,6 +3,7 @@ using Lavari.Application.Abstractions;
 using Lavari.Application.Locking;
 using Lavari.Application.Services;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Contracts.Locking;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Money;
@@ -59,14 +60,14 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         _ids = ids;
     }
 
-    public async Task<IReadOnlyList<FinancialDocumentDto>> ListForJobAsync(Guid jobId, string? documentType = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<FinancialDocumentDto>> ListForJobAsync(Guid jobId, FinancialDocumentType? documentType = null, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
-        if (string.Equals(documentType, "Quote", StringComparison.OrdinalIgnoreCase))
+        if (documentType == FinancialDocumentType.Quote)
         {
             _permissions.Require(ModuleKeys.Quotes, AccessLevel.Read);
         }
-        else if (string.Equals(documentType, "Invoice", StringComparison.OrdinalIgnoreCase))
+        else if (documentType == FinancialDocumentType.Invoice)
         {
             _permissions.Require(ModuleKeys.Invoices, AccessLevel.Read);
         }
@@ -84,16 +85,16 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
             .Include(d => d.Adjustments)
             .Where(d => d.JobId == jobId);
 
-        if (!string.IsNullOrWhiteSpace(documentType))
+        if (documentType.HasValue)
         {
-            query = query.Where(d => d.DocumentType == documentType);
+            query = query.Where(d => d.DocumentType == documentType.Value);
         }
         else
         {
             var canQ = _permissions.Has(ModuleKeys.Quotes, AccessLevel.Read);
             var canI = _permissions.Has(ModuleKeys.Invoices, AccessLevel.Read);
-            if (!canQ) query = query.Where(d => d.DocumentType != "Quote");
-            if (!canI) query = query.Where(d => d.DocumentType != "Invoice");
+            if (!canQ) query = query.Where(d => d.DocumentType != FinancialDocumentType.Quote);
+            if (!canI) query = query.Where(d => d.DocumentType != FinancialDocumentType.Invoice);
         }
 
         var docs = await query.OrderByDescending(d => d.CreatedAtUtc).ToListAsync(ct);
@@ -115,7 +116,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
 
     public async Task<FinancialDocumentDto> CreateAsync(CreateFinancialDocumentRequest request, CancellationToken ct = default)
     {
-        var docType = NormalizeDocType(request.DocumentType);
+        var docType = request.DocumentType;
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleForDocType(docType), AccessLevel.Alter);
 
@@ -214,7 +215,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         await _db.SaveChangesAsync(ct);
 
         // If this is an Invoice with TimeEntry lines, allocate time transactionally to prevent double billing!
-        if (docType == "Invoice")
+        if (docType == FinancialDocumentType.Invoice)
         {
             await SyncInvoiceTimeAllocationsAsync(entity, ct);
         }
@@ -239,7 +240,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
                 ErrorCodes.RecordImmutable);
         }
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(doc.DocumentType, doc.Id, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(ToLockRecordType(doc.DocumentType), doc.Id, request.LeaseId, request.FencingVersion, ct);
 
         if (!string.Equals(doc.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
         {
@@ -365,7 +366,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
 
         await _db.SaveChangesAsync(ct);
 
-        if (doc.DocumentType == "Invoice")
+        if (doc.DocumentType == FinancialDocumentType.Invoice)
         {
             await SyncInvoiceTimeAllocationsAsync(doc, ct);
         }
@@ -383,7 +384,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         _permissions.Require(ModuleKeys.Invoices, AccessLevel.Alter);
 
         var quote = await GetAsync(quoteId, ct);
-        if (quote.DocumentType != "Quote")
+        if (quote.DocumentType != FinancialDocumentType.Quote)
         {
             throw new ValidationServiceException("Only quotes can be converted into invoices.");
         }
@@ -391,7 +392,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         var createReq = new CreateFinancialDocumentRequest
         {
             JobId = quote.JobId,
-            DocumentType = "Invoice",
+            DocumentType = FinancialDocumentType.Invoice,
             CalculationMode = quote.CalculationMode,
             Currency = quote.Currency,
             TaxBasisPoints = quote.TaxBasisPoints,
@@ -465,7 +466,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         var paymentDetails = await _admin.GetVariableValueAsync("Finance.PaymentDetails", string.Empty, ct);
         var paymentTerms = await _admin.GetVariableValueAsync("Finance.PaymentTerms", "7 day payment terms", ct);
 
-        var title = doc.DocumentType == "Quote" ? "Q U O T E" : "I N V O I C E";
+        var title = doc.DocumentType == FinancialDocumentType.Quote ? "Q U O T E" : "I N V O I C E";
         if (isDraft || doc.Status == "Draft") title += " (DRAFT)";
 
         var adjParts = new List<string>();
@@ -513,7 +514,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         {
             Id = _ids.NewId(),
             JobId = doc.JobId,
-            SourceType = doc.DocumentType,
+            SourceType = ToArtifactSourceType(doc.DocumentType),
             SourceId = doc.Id,
             SourceVersion = $"{doc.VersionNumber}:{doc.ConcurrencyToken}",
             Format = "Docx",
@@ -559,7 +560,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         {
             Id = _ids.NewId(),
             JobId = doc.JobId,
-            SourceType = doc.DocumentType,
+            SourceType = ToArtifactSourceType(doc.DocumentType),
             SourceId = doc.Id,
             SourceVersion = $"{doc.VersionNumber}:{doc.ConcurrencyToken}",
             Format = "Pdf",
@@ -586,7 +587,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
             ?? throw new NotFoundServiceException("Financial document not found.");
 
         _permissions.Require(ModuleForDocType(doc.DocumentType), AccessLevel.Alter);
-        await _editLocks.EnsureActiveLeaseHeldAsync(doc.DocumentType, doc.Id, leaseId, fencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(ToLockRecordType(doc.DocumentType), doc.Id, leaseId, fencingVersion, ct);
 
         if (doc.Status != "Draft")
         {
@@ -627,12 +628,12 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         return await GetAsync(doc.Id, ct);
     }
 
-    public async Task<IReadOnlyList<GeneratedArtifactDto>> ListArtifactsAsync(Guid jobId, string? sourceType = null, Guid? sourceId = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<GeneratedArtifactDto>> ListArtifactsAsync(Guid jobId, ArtifactSourceType? sourceType = null, Guid? sourceId = null, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
 
         var query = _db.GeneratedArtifacts.AsNoTracking().Where(a => a.JobId == jobId);
-        if (!string.IsNullOrWhiteSpace(sourceType)) query = query.Where(a => a.SourceType == sourceType);
+        if (sourceType.HasValue) query = query.Where(a => a.SourceType == sourceType.Value);
         if (sourceId.HasValue) query = query.Where(a => a.SourceId == sourceId.Value);
 
         var rows = await query.OrderByDescending(a => a.CreatedAtUtc).Take(100).ToListAsync(ct);
@@ -668,7 +669,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
     public async Task<ProcurementItemDto> CreateProcurementAsync(Guid jobId, UpsertProcurementItemRequest request, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.Procurement, AccessLevel.Alter);
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, jobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, jobId, request.LeaseId, request.FencingVersion, ct);
 
         if (string.IsNullOrWhiteSpace(request.SupplierName))
         {
@@ -706,7 +707,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         var item = await _db.ProcurementItems.Include(p => p.Payments).FirstOrDefaultAsync(p => p.Id == id, ct)
             ?? throw new NotFoundServiceException("Procurement item not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, item.JobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, item.JobId, request.LeaseId, request.FencingVersion, ct);
         if (!string.Equals(item.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
         {
             throw new ConflictServiceException("Procurement record was modified by another user.");
@@ -735,7 +736,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         var item = await _db.ProcurementItems.Include(p => p.Payments).FirstOrDefaultAsync(p => p.Id == procurementId, ct)
             ?? throw new NotFoundServiceException("Procurement item not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, item.JobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, item.JobId, request.LeaseId, request.FencingVersion, ct);
         var currency = MoneyCents.NormalizeAndValidateCurrency(request.Currency);
         if (!string.Equals(currency, item.Currency, StringComparison.Ordinal))
         {
@@ -863,7 +864,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
     private async Task SyncInvoiceTimeAllocationsAsync(FinancialDocumentEntity invoice, CancellationToken ct)
     {
         var activeTimeLines = await _db.FinancialDocumentLines
-            .Where(l => l.FinancialDocumentId == invoice.Id && l.LineSourceType == "TimeEntry" && l.SourceEntityId != null)
+            .Where(l => l.FinancialDocumentId == invoice.Id && l.LineSourceType == FinancialLineSourceType.TimeEntry && l.SourceEntityId != null)
             .ToListAsync(ct);
 
         // Deactivate old allocations for this draft invoice
@@ -945,12 +946,12 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         await _db.SaveChangesAsync(ct);
     }
 
-    private async Task<string> GenerateNextDocumentNumberAsync(string docType, CancellationToken ct)
+    private async Task<string> GenerateNextDocumentNumberAsync(FinancialDocumentType docType, CancellationToken ct)
     {
         await DocumentNumberGate.WaitAsync(ct);
         try
         {
-            var prefix = docType == "Quote" ? "Q" : "INV";
+            var prefix = docType == FinancialDocumentType.Quote ? "Q" : "INV";
             var year = _timeProvider.GetUtcNow().Year;
             var pattern = $"{prefix}-{year}-";
 
@@ -1028,7 +1029,7 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         foreach (var adj in adjustments)
         {
             var amt = new MoneyCents(Math.Abs(adj.AmountCents), currency);
-            if (adj.AdjustmentType.Equals("Discount", StringComparison.OrdinalIgnoreCase))
+            if (adj.AdjustmentType == FinancialAdjustmentType.Discount)
             {
                 discounts = discounts.Add(amt);
             }
@@ -1071,25 +1072,25 @@ public sealed class FinancialDocumentService : IFinancialDocumentService
         return (subtotal.Cents, discounts.Cents, credits.Cents, tax.Cents, calculated.Cents, applied.Cents, deposit);
     }
 
-    private bool CanReadArtifactSource(string sourceType)
+    private bool CanReadArtifactSource(ArtifactSourceType sourceType)
         => _permissions.Has(ModuleForArtifactSource(sourceType), AccessLevel.Read);
 
-    private static string ModuleForArtifactSource(string sourceType) => sourceType switch
+    private static string ModuleForArtifactSource(ArtifactSourceType sourceType) => sourceType switch
     {
-        "Quote" => ModuleKeys.Quotes,
-        "Invoice" => ModuleKeys.Invoices,
-        "MoodBoard" => ModuleKeys.MoodBoards,
+        ArtifactSourceType.Quote => ModuleKeys.Quotes,
+        ArtifactSourceType.Invoice => ModuleKeys.Invoices,
+        ArtifactSourceType.MoodBoard => ModuleKeys.MoodBoards,
         _ => ModuleKeys.Jobs
     };
 
-    private static string ModuleForDocType(string docType) => docType == "Quote" ? ModuleKeys.Quotes : ModuleKeys.Invoices;
+    private static string ModuleForDocType(FinancialDocumentType docType) =>
+        docType == FinancialDocumentType.Quote ? ModuleKeys.Quotes : ModuleKeys.Invoices;
 
-    private static string NormalizeDocType(string docType) => docType.Trim().ToLowerInvariant() switch
-    {
-        "quote" => "Quote",
-        "invoice" => "Invoice",
-        _ => throw new ValidationServiceException("Document type must be Quote or Invoice.")
-    };
+    private static LockableRecordType ToLockRecordType(FinancialDocumentType docType) =>
+        docType == FinancialDocumentType.Quote ? LockableRecordType.Quote : LockableRecordType.Invoice;
+
+    private static ArtifactSourceType ToArtifactSourceType(FinancialDocumentType docType) =>
+        docType == FinancialDocumentType.Quote ? ArtifactSourceType.Quote : ArtifactSourceType.Invoice;
 
     private static string NormalizeCalculationMode(string mode) => mode.Trim() switch
     {

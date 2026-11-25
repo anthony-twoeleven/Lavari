@@ -1,3 +1,4 @@
+using Lavari.Contracts.Common;
 using Lavari.Domain.Security;
 
 namespace Lavari.Infrastructure.Persistence.Entities;
@@ -44,7 +45,7 @@ public sealed class UserRoleEntity : AuditableSoftDeletableEntity
 public sealed class ApplicationVariableEntity : AuditableSoftDeletableEntity
 {
     public string Key { get; set; } = string.Empty;
-    public string ValueType { get; set; } = "string";
+    public ApplicationVariableValueType ValueType { get; set; } = ApplicationVariableValueType.String;
     public string Value { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string? ValidationRule { get; set; }

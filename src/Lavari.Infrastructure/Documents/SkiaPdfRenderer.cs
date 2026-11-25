@@ -1,6 +1,7 @@
 using Lavari.Application.Abstractions;
 using Lavari.Application.Services;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Money;
 using SkiaSharp;
 
@@ -67,7 +68,7 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
             }
         }
 
-        var docHeading = document.DocumentType.Equals("Quote", StringComparison.OrdinalIgnoreCase) ? "Q U O T E" : "I N V O I C E";
+        var docHeading = document.DocumentType == FinancialDocumentType.Quote ? "Q U O T E" : "I N V O I C E";
         if (document.Status == "Draft")
         {
             docHeading += "  (DRAFT)";
@@ -276,7 +277,7 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
                     offsetX + (float)((el.X + el.Width) * scale),
                     offsetY + (float)((el.Y + el.Height) * scale));
 
-                if (el.ElementType.Equals("Image", StringComparison.OrdinalIgnoreCase) &&
+                if (el.ElementType == MoodBoardElementType.Image &&
                     el.ImageAssetId.HasValue &&
                     imageBytesByAssetId.TryGetValue(el.ImageAssetId.Value, out var imgBytes))
                 {
@@ -294,7 +295,7 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
                         pdfCanvas.DrawImage(img, dest, HighQualitySampling);
                     }
                 }
-                else if (el.ElementType.Equals("Text", StringComparison.OrdinalIgnoreCase) &&
+                else if (el.ElementType == MoodBoardElementType.Text &&
                          !string.IsNullOrWhiteSpace(el.TextContent))
                 {
                     using var textFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), Math.Max(7f, (float)(el.FontSizePx * scale)));

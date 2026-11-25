@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Contracts.Business;
 
 public sealed record TimeIntervalDto
@@ -19,7 +21,7 @@ public sealed record TimeEntryDto
     public required Guid WorkerUserId { get; init; }
     public required string WorkerDisplayName { get; init; }
     public string? Description { get; init; }
-    public required string SourceType { get; init; }
+    public required TimeEntrySourceType SourceType { get; init; }
     public required string State { get; init; }
     public required bool IsBillable { get; init; }
     public required DateOnly WorkDate { get; init; }

@@ -1,5 +1,6 @@
 using Lavari.Application.Abstractions;
 using Lavari.Application.Locking;
+using Lavari.Contracts.Common;
 using Lavari.Contracts.Locking;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
@@ -45,17 +46,16 @@ public sealed class EditLockService : IEditLockService
         _notifier = notifier;
     }
 
-    public async Task<EditLockStatusDto> GetStatusAsync(string recordType, Guid recordId, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> GetStatusAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Read);
-        await EnsureRecordExistsAsync(normalizedType, recordId, ct);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Read);
+        await EnsureRecordExistsAsync(recordType, recordId, ct);
 
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
-            return await BuildStatusAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
+            return await BuildStatusAsync(recordType, recordId, ct);
         }
         finally
         {
@@ -63,11 +63,10 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task<EditLockStatusDto> RequestModifyAsync(string recordType, Guid recordId, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> RequestModifyAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Alter);
-        await EnsureRecordExistsAsync(normalizedType, recordId, ct);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Alter);
+        await EnsureRecordExistsAsync(recordType, recordId, ct);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
@@ -75,21 +74,21 @@ public sealed class EditLockService : IEditLockService
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
             var now = _timeProvider.GetUtcNow();
             var leaseDuration = await GetPolicyDurationAsync("Lock.LeaseDurationSeconds", 300, ct);
 
             var current = await _db.EditLeases
-                .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId &&
+                .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId &&
                                           (x.State == "Active" || x.State == "Reserved"), ct);
 
             if (current is null)
             {
-                var nextFencing = await GetNextFencingVersionAsync(normalizedType, recordId, ct);
+                var nextFencing = await GetNextFencingVersionAsync(recordType, recordId, ct);
                 var lease = new EditLeaseEntity
                 {
                     Id = _ids.NewId(),
-                    RecordType = normalizedType,
+                    RecordType = recordType,
                     RecordId = recordId,
                     ActorId = actorId,
                     ActorDisplayName = _actor.ActorDisplayName,
@@ -102,42 +101,39 @@ public sealed class EditLockService : IEditLockService
                 };
                 _db.EditLeases.Add(lease);
                 await _db.SaveChangesAsync(ct);
-                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(normalizedType), normalizedType, recordId, "lock.acquired", ct);
-                return await BuildStatusAsync(normalizedType, recordId, ct);
+                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(recordType), recordType.ToString(), recordId, "lock.acquired", ct);
+                return await BuildStatusAsync(recordType, recordId, ct);
             }
 
-            // Already held by this session -> renew and return
             if (current.State == "Active" && current.ActorId == actorId && current.EditingSessionId == sessionId)
             {
                 current.LastRenewedAtUtc = now;
                 current.ExpiresAtUtc = now.Add(leaseDuration);
                 await _db.SaveChangesAsync(ct);
-                return await BuildStatusAsync(normalizedType, recordId, ct);
+                return await BuildStatusAsync(recordType, recordId, ct);
             }
 
-            // Reserved for this session -> promote to Active!
             if (current.State == "Reserved" && current.ActorId == actorId && current.EditingSessionId == sessionId)
             {
-                return await ClaimInternalAsync(normalizedType, recordId, current, ct);
+                return await ClaimInternalAsync(recordType, recordId, current, ct);
             }
 
-            // Otherwise join FIFO queue (prevent duplicate entry for same session & record)
             var existingQueue = await _db.EditQueueEntries
-                .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId &&
+                .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId &&
                                           x.ActorId == actorId && x.EditingSessionId == sessionId &&
                                           (x.State == "Queued" || x.State == "Reserved"), ct);
 
             if (existingQueue is null)
             {
                 var maxSeq = await _db.EditQueueEntries
-                    .Where(x => x.RecordType == normalizedType && x.RecordId == recordId)
+                    .Where(x => x.RecordType == recordType && x.RecordId == recordId)
                     .Select(x => (long?)x.SequenceNumber)
                     .MaxAsync(ct) ?? 0L;
 
                 _db.EditQueueEntries.Add(new EditQueueEntryEntity
                 {
                     Id = _ids.NewId(),
-                    RecordType = normalizedType,
+                    RecordType = recordType,
                     RecordId = recordId,
                     ActorId = actorId,
                     ActorDisplayName = _actor.ActorDisplayName,
@@ -147,10 +143,10 @@ public sealed class EditLockService : IEditLockService
                     RequestedAtUtc = now
                 });
                 await _db.SaveChangesAsync(ct);
-                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(normalizedType), normalizedType, recordId, "lock.queued", ct);
+                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(recordType), recordType.ToString(), recordId, "lock.queued", ct);
             }
 
-            return await BuildStatusAsync(normalizedType, recordId, ct);
+            return await BuildStatusAsync(recordType, recordId, ct);
         }
         finally
         {
@@ -158,11 +154,10 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task<EditLockStatusDto> ClaimReservationAsync(string recordType, Guid recordId, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> ClaimReservationAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Alter);
-        await EnsureRecordExistsAsync(normalizedType, recordId, ct);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Alter);
+        await EnsureRecordExistsAsync(recordType, recordId, ct);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
@@ -170,9 +165,9 @@ public sealed class EditLockService : IEditLockService
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
             var current = await _db.EditLeases
-                .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId && x.State == "Reserved", ct);
+                .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId && x.State == "Reserved", ct);
 
             if (current is null || current.ActorId != actorId || current.EditingSessionId != sessionId)
             {
@@ -182,7 +177,7 @@ public sealed class EditLockService : IEditLockService
                     "Click Modify again to acquire a lock or rejoin the queue.");
             }
 
-            return await ClaimInternalAsync(normalizedType, recordId, current, ct);
+            return await ClaimInternalAsync(recordType, recordId, current, ct);
         }
         finally
         {
@@ -190,10 +185,9 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task<EditLockStatusDto> RenewLeaseAsync(string recordType, Guid recordId, Guid leaseId, long fencingVersion, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> RenewLeaseAsync(LockableRecordType recordType, Guid recordId, Guid leaseId, long fencingVersion, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Alter);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Alter);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
@@ -201,9 +195,9 @@ public sealed class EditLockService : IEditLockService
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
             var current = await _db.EditLeases
-                .FirstOrDefaultAsync(x => x.Id == leaseId && x.RecordType == normalizedType && x.RecordId == recordId, ct);
+                .FirstOrDefaultAsync(x => x.Id == leaseId && x.RecordType == recordType && x.RecordId == recordId, ct);
 
             if (current is null || current.State != "Active" || current.ActorId != actorId ||
                 current.EditingSessionId != sessionId || current.FencingVersion != fencingVersion)
@@ -220,7 +214,7 @@ public sealed class EditLockService : IEditLockService
             current.ExpiresAtUtc = now.Add(leaseDuration);
             await _db.SaveChangesAsync(ct);
 
-            return await BuildStatusAsync(normalizedType, recordId, ct);
+            return await BuildStatusAsync(recordType, recordId, ct);
         }
         finally
         {
@@ -228,10 +222,9 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task<EditLockStatusDto> ReleaseLeaseAsync(string recordType, Guid recordId, Guid? leaseId = null, long? fencingVersion = null, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> ReleaseLeaseAsync(LockableRecordType recordType, Guid recordId, Guid? leaseId = null, long? fencingVersion = null, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Read);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Read);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
@@ -239,10 +232,10 @@ public sealed class EditLockService : IEditLockService
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
 
             var current = await _db.EditLeases
-                .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId &&
+                .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId &&
                                           (x.State == "Active" || x.State == "Reserved") &&
                                           x.ActorId == actorId && x.EditingSessionId == sessionId, ct);
 
@@ -269,11 +262,11 @@ public sealed class EditLockService : IEditLockService
                 }
 
                 await _db.SaveChangesAsync(ct);
-                await AdvanceQueueIfFreeAsync(normalizedType, recordId, ct);
-                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(normalizedType), normalizedType, recordId, "lock.released", ct);
+                await AdvanceQueueIfFreeAsync(recordType, recordId, ct);
+                await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(recordType), recordType.ToString(), recordId, "lock.released", ct);
             }
 
-            return await BuildStatusAsync(normalizedType, recordId, ct);
+            return await BuildStatusAsync(recordType, recordId, ct);
         }
         finally
         {
@@ -281,10 +274,9 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task<EditLockStatusDto> CancelQueueEntryAsync(string recordType, Guid recordId, CancellationToken ct = default)
+    public async Task<EditLockStatusDto> CancelQueueEntryAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Read);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Read);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
@@ -292,10 +284,10 @@ public sealed class EditLockService : IEditLockService
         await SerialGate.WaitAsync(ct);
         try
         {
-            await ExpireAndAdvanceAsync(normalizedType, recordId, ct);
+            await ExpireAndAdvanceAsync(recordType, recordId, ct);
 
             var entries = await _db.EditQueueEntries
-                .Where(x => x.RecordType == normalizedType && x.RecordId == recordId &&
+                .Where(x => x.RecordType == recordType && x.RecordId == recordId &&
                             x.ActorId == actorId && x.EditingSessionId == sessionId &&
                             (x.State == "Queued" || x.State == "Reserved"))
                 .ToListAsync(ct);
@@ -313,7 +305,7 @@ public sealed class EditLockService : IEditLockService
             if (wasReserved)
             {
                 var resLease = await _db.EditLeases
-                    .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId &&
+                    .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId &&
                                               x.State == "Reserved" && x.ActorId == actorId && x.EditingSessionId == sessionId, ct);
                 if (resLease is not null)
                 {
@@ -326,11 +318,11 @@ public sealed class EditLockService : IEditLockService
                 await _db.SaveChangesAsync(ct);
                 if (wasReserved)
                 {
-                    await AdvanceQueueIfFreeAsync(normalizedType, recordId, ct);
+                    await AdvanceQueueIfFreeAsync(recordType, recordId, ct);
                 }
             }
 
-            return await BuildStatusAsync(normalizedType, recordId, ct);
+            return await BuildStatusAsync(recordType, recordId, ct);
         }
         finally
         {
@@ -338,22 +330,21 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    public async Task EnsureActiveLeaseHeldAsync(string recordType, Guid recordId, Guid? leaseId, long? fencingVersion, CancellationToken ct = default)
+    public async Task EnsureActiveLeaseHeldAsync(LockableRecordType recordType, Guid recordId, Guid? leaseId, long? fencingVersion, CancellationToken ct = default)
     {
-        var normalizedType = NormalizeRecordType(recordType);
-        _permissions.Require(ModuleForRecordType(normalizedType), AccessLevel.Alter);
+        _permissions.Require(ModuleForRecordType(recordType), AccessLevel.Alter);
 
         var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
         var sessionId = _actor.EditingSessionId;
         var now = _timeProvider.GetUtcNow();
 
         var active = await _db.EditLeases
-            .FirstOrDefaultAsync(x => x.RecordType == normalizedType && x.RecordId == recordId && x.State == "Active", ct);
+            .FirstOrDefaultAsync(x => x.RecordType == recordType && x.RecordId == recordId && x.State == "Active", ct);
 
         if (active is null)
         {
             throw new ConflictServiceException(
-                $"You must select Modify to acquire an exclusive edit lock on this {normalizedType} before saving.",
+                $"You must select Modify to acquire an exclusive edit lock on this {recordType} before saving.",
                 ErrorCodes.EditLockRequired,
                 "Click Modify to begin editing.");
         }
@@ -362,9 +353,9 @@ public sealed class EditLockService : IEditLockService
         {
             active.State = "Expired";
             await _db.SaveChangesAsync(ct);
-            await AdvanceQueueIfFreeAsync(normalizedType, recordId, ct);
+            await AdvanceQueueIfFreeAsync(recordType, recordId, ct);
             throw new ConflictServiceException(
-                $"Your editing lock on this {normalizedType} has expired.",
+                $"Your editing lock on this {recordType} has expired.",
                 ErrorCodes.EditLockExpired,
                 "Click Modify to reacquire the lock and review the latest version before saving.");
         }
@@ -372,7 +363,7 @@ public sealed class EditLockService : IEditLockService
         if (active.ActorId != actorId || active.EditingSessionId != sessionId)
         {
             throw new ConflictServiceException(
-                $"This {normalizedType} is currently locked for editing by another session.",
+                $"This {recordType} is currently locked for editing by another session.",
                 ErrorCodes.EditLockHeldByAnother,
                 "Click Modify to join the queue and be notified when editing opens.");
         }
@@ -409,7 +400,7 @@ public sealed class EditLockService : IEditLockService
                 return 0;
             }
 
-            var records = new HashSet<(string Type, Guid Id)>();
+            var records = new HashSet<(LockableRecordType Type, Guid Id)>();
             foreach (var lease in expired)
             {
                 lease.State = "Expired";
@@ -492,7 +483,7 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    private async Task<EditLockStatusDto> ClaimInternalAsync(string recordType, Guid recordId, EditLeaseEntity reservedLease, CancellationToken ct)
+    private async Task<EditLockStatusDto> ClaimInternalAsync(LockableRecordType recordType, Guid recordId, EditLeaseEntity reservedLease, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
         var leaseDuration = await GetPolicyDurationAsync("Lock.LeaseDurationSeconds", 300, ct);
@@ -511,11 +502,11 @@ public sealed class EditLockService : IEditLockService
         }
 
         await _db.SaveChangesAsync(ct);
-        await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(recordType), recordType, recordId, "lock.claimed", ct);
+        await _notifier.NotifyRecordChangedAsync(ModuleForRecordType(recordType), recordType.ToString(), recordId, "lock.claimed", ct);
         return await BuildStatusAsync(recordType, recordId, ct);
     }
 
-    private async Task ExpireAndAdvanceAsync(string recordType, Guid recordId, CancellationToken ct)
+    private async Task ExpireAndAdvanceAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
         var expired = await _db.EditLeases
@@ -544,7 +535,7 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    private async Task AdvanceQueueIfFreeAsync(string recordType, Guid recordId, CancellationToken ct)
+    private async Task AdvanceQueueIfFreeAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct)
     {
         var hasActiveOrReserved = await _db.EditLeases
             .AnyAsync(x => x.RecordType == recordType && x.RecordId == recordId &&
@@ -621,7 +612,7 @@ public sealed class EditLockService : IEditLockService
                 notification.Category,
                 notification.Title,
                 notification.Message,
-                recordType,
+                recordType.ToString(),
                 recordId,
                 ct);
             return;
@@ -658,7 +649,7 @@ public sealed class EditLockService : IEditLockService
         return PermissionRegistry.Satisfies(effective, moduleKey, AccessLevel.Alter);
     }
 
-    private async Task<EditLockStatusDto> BuildStatusAsync(string recordType, Guid recordId, CancellationToken ct)
+    private async Task<EditLockStatusDto> BuildStatusAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct)
     {
         var actorId = _actor.ActorId;
         var sessionId = _actor.EditingSessionId;
@@ -701,7 +692,7 @@ public sealed class EditLockService : IEditLockService
         };
     }
 
-    private async Task<long> GetNextFencingVersionAsync(string recordType, Guid recordId, CancellationToken ct)
+    private async Task<long> GetNextFencingVersionAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct)
     {
         var max = await _db.EditLeases
             .IgnoreQueryFilters()
@@ -723,13 +714,13 @@ public sealed class EditLockService : IEditLockService
         return TimeSpan.FromSeconds(fallbackSeconds);
     }
 
-    private async Task EnsureRecordExistsAsync(string recordType, Guid recordId, CancellationToken ct)
+    private async Task EnsureRecordExistsAsync(LockableRecordType recordType, Guid recordId, CancellationToken ct)
     {
         var exists = recordType switch
         {
-            LockableRecordTypes.Job => await _db.Jobs.AnyAsync(x => x.Id == recordId, ct),
-            LockableRecordTypes.Quote => await _db.FinancialDocuments.AnyAsync(x => x.Id == recordId && x.DocumentType == "Quote", ct),
-            LockableRecordTypes.Invoice => await _db.FinancialDocuments.AnyAsync(x => x.Id == recordId && x.DocumentType == "Invoice", ct),
+            LockableRecordType.Job => await _db.Jobs.AnyAsync(x => x.Id == recordId, ct),
+            LockableRecordType.Quote => await _db.FinancialDocuments.AnyAsync(x => x.Id == recordId && x.DocumentType == FinancialDocumentType.Quote, ct),
+            LockableRecordType.Invoice => await _db.FinancialDocuments.AnyAsync(x => x.Id == recordId && x.DocumentType == FinancialDocumentType.Invoice, ct),
             _ => false
         };
 
@@ -739,19 +730,11 @@ public sealed class EditLockService : IEditLockService
         }
     }
 
-    private static string NormalizeRecordType(string recordType) => recordType.Trim().ToLowerInvariant() switch
+    private static string ModuleForRecordType(LockableRecordType recordType) => recordType switch
     {
-        "job" => LockableRecordTypes.Job,
-        "quote" => LockableRecordTypes.Quote,
-        "invoice" => LockableRecordTypes.Invoice,
-        _ => throw new ValidationServiceException($"'{recordType}' is not a lockable record type.")
-    };
-
-    private static string ModuleForRecordType(string recordType) => recordType switch
-    {
-        LockableRecordTypes.Job => ModuleKeys.Jobs,
-        LockableRecordTypes.Quote => ModuleKeys.Quotes,
-        LockableRecordTypes.Invoice => ModuleKeys.Invoices,
+        LockableRecordType.Job => ModuleKeys.Jobs,
+        LockableRecordType.Quote => ModuleKeys.Quotes,
+        LockableRecordType.Invoice => ModuleKeys.Invoices,
         _ => throw new ValidationServiceException($"Unknown lockable record type '{recordType}'.")
     };
 }

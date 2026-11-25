@@ -1,9 +1,11 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Contracts.Business;
 
 public sealed record FinancialDocumentLineDto
 {
     public required Guid Id { get; init; }
-    public required string LineSourceType { get; init; }
+    public required FinancialLineSourceType LineSourceType { get; init; }
     public Guid? SourceEntityId { get; init; }
     public string? SourceEntityVersion { get; init; }
     public required string Title { get; init; }
@@ -20,7 +22,7 @@ public sealed record FinancialDocumentLineDto
 public sealed record FinancialDocumentAdjustmentDto
 {
     public required Guid Id { get; init; }
-    public required string AdjustmentType { get; init; } // Discount, Credit
+    public required FinancialAdjustmentType AdjustmentType { get; init; }
     public required string Description { get; init; }
     public required long AmountCents { get; init; }
     public int? BasisPoints { get; init; }
@@ -34,7 +36,7 @@ public sealed record FinancialDocumentDto
     public required Guid JobId { get; init; }
     public required string JobName { get; init; }
     public required string ClientName { get; init; }
-    public required string DocumentType { get; init; } // Quote, Invoice
+    public required FinancialDocumentType DocumentType { get; init; }
     public required string DocumentNumber { get; init; }
     public required string Status { get; init; } // Draft, Issued, Void
     public required string CalculationMode { get; init; } // LineCalculated, ManualOverride, TotalOnly
@@ -69,7 +71,7 @@ public sealed record FinancialDocumentDto
 
 public sealed record SaveFinancialDocumentLineInput
 {
-    public string LineSourceType { get; init; } = "Manual";
+    public FinancialLineSourceType LineSourceType { get; init; } = FinancialLineSourceType.Manual;
     public Guid? SourceEntityId { get; init; }
     public string? SourceEntityVersion { get; init; }
     public required string Title { get; init; }
@@ -84,7 +86,7 @@ public sealed record SaveFinancialDocumentLineInput
 
 public sealed record SaveFinancialDocumentAdjustmentInput
 {
-    public required string AdjustmentType { get; init; } // Discount, Credit
+    public required FinancialAdjustmentType AdjustmentType { get; init; }
     public required string Description { get; init; }
     public long AmountCents { get; init; }
     public int? BasisPoints { get; init; }
@@ -95,7 +97,7 @@ public sealed record SaveFinancialDocumentAdjustmentInput
 public sealed record CreateFinancialDocumentRequest
 {
     public required Guid JobId { get; init; }
-    public required string DocumentType { get; init; } // Quote, Invoice
+    public required FinancialDocumentType DocumentType { get; init; }
     public string CalculationMode { get; init; } = "LineCalculated";
     public string? Currency { get; init; }
     public int? TaxBasisPoints { get; init; }
@@ -159,7 +161,7 @@ public sealed record GeneratedArtifactDto
 {
     public required Guid Id { get; init; }
     public required Guid JobId { get; init; }
-    public required string SourceType { get; init; }
+    public required ArtifactSourceType SourceType { get; init; }
     public required Guid SourceId { get; init; }
     public required string Format { get; init; }
     public required string FileName { get; init; }
@@ -269,7 +271,7 @@ public sealed record ForecastSourceItemDto
 {
     public required Guid JobId { get; init; }
     public required string JobName { get; init; }
-    public required string SourceType { get; init; } // Milestone, Invoice, Quote, Procurement, Time
+    public required ForecastSourceType SourceType { get; init; }
     public required Guid SourceId { get; init; }
     public required string Label { get; init; }
     public required DateOnly EffectiveDate { get; init; }

@@ -1,6 +1,7 @@
 using Lavari.Application.Abstractions;
 using Lavari.Application.Services;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
 using Lavari.Domain.Time;
@@ -187,7 +188,7 @@ public sealed class TimeTrackingService : ITimeTrackingService
                 WorkerUserId = workerId,
                 WorkerDisplayName = _actor.ActorDisplayName,
                 Description = request.Description?.Trim(),
-                SourceType = "Timer",
+                SourceType = TimeEntrySourceType.Timer,
                 State = "Running",
                 IsBillable = request.IsBillable,
                 WorkDate = DateOnly.FromDateTime(localStart.Date),
@@ -488,7 +489,7 @@ public sealed class TimeTrackingService : ITimeTrackingService
             WorkerUserId = workerId,
             WorkerDisplayName = _actor.ActorDisplayName,
             Description = request.Description?.Trim(),
-            SourceType = "FlatDuration",
+            SourceType = TimeEntrySourceType.FlatDuration,
             State = "Stopped",
             IsBillable = request.IsBillable,
             WorkDate = request.WorkDate,
@@ -536,7 +537,7 @@ public sealed class TimeTrackingService : ITimeTrackingService
             WorkerUserId = workerId,
             WorkerDisplayName = _actor.ActorDisplayName,
             Description = request.Description?.Trim(),
-            SourceType = "TimeRange",
+            SourceType = TimeEntrySourceType.TimeRange,
             State = "Stopped",
             IsBillable = request.IsBillable,
             WorkDate = workDate,
@@ -739,7 +740,7 @@ public sealed class TimeTrackingService : ITimeTrackingService
 
     private static long ComputeLiveSeconds(TimeEntryEntity entry, DateTimeOffset now)
     {
-        if (entry.SourceType == "FlatDuration")
+        if (entry.SourceType == TimeEntrySourceType.FlatDuration)
         {
             return entry.DurationSeconds;
         }

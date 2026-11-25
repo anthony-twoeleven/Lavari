@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Infrastructure.Persistence.Entities;
 
 public sealed class ProductEntity : AuditableSoftDeletableEntity
@@ -82,7 +84,7 @@ public sealed class ImageAssociationEntity : AuditableSoftDeletableEntity
     public Guid? ProductId { get; set; }
     public Guid? MoodBoardId { get; set; }
     public Guid? ReceiptId { get; set; }
-    public string AssociationType { get; set; } = "Library";
+    public ImageAssociationType AssociationType { get; set; } = ImageAssociationType.Library;
 }
 
 public sealed class MoodBoardEntity : AuditableSoftDeletableEntity
@@ -112,7 +114,7 @@ public sealed class MoodBoardElementEntity : AuditableSoftDeletableEntity
 {
     public Guid CanvasId { get; set; }
     public MoodBoardCanvasEntity Canvas { get; set; } = null!;
-    public string ElementType { get; set; } = "Image"; // Image, Text
+    public MoodBoardElementType ElementType { get; set; } = MoodBoardElementType.Image;
     public Guid? ImageAssetId { get; set; }
     public string? TextContent { get; set; }
     public int FontSizePx { get; set; } = 24;

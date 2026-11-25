@@ -1,10 +1,12 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Infrastructure.Persistence.Entities;
 
 public sealed class FinancialDocumentEntity : AuditableSoftDeletableEntity
 {
     public Guid JobId { get; set; }
     public JobEntity Job { get; set; } = null!;
-    public string DocumentType { get; set; } = "Quote"; // Quote, Invoice
+    public FinancialDocumentType DocumentType { get; set; } = FinancialDocumentType.Quote;
     public string DocumentNumber { get; set; } = string.Empty;
     public string Status { get; set; } = "Draft"; // Draft, Issued, Void
     public string CalculationMode { get; set; } = "LineCalculated"; // LineCalculated, ManualOverride, TotalOnly
@@ -46,7 +48,7 @@ public sealed class FinancialDocumentLineEntity : AuditableSoftDeletableEntity
 {
     public Guid FinancialDocumentId { get; set; }
     public FinancialDocumentEntity FinancialDocument { get; set; } = null!;
-    public string LineSourceType { get; set; } = "Manual"; // Manual, JobLineItem, TimeEntry
+    public FinancialLineSourceType LineSourceType { get; set; } = FinancialLineSourceType.Manual;
     public Guid? SourceEntityId { get; set; }
     public string? SourceEntityVersion { get; set; }
     public string Title { get; set; } = string.Empty;
@@ -64,7 +66,7 @@ public sealed class FinancialDocumentAdjustmentEntity : AuditableSoftDeletableEn
 {
     public Guid FinancialDocumentId { get; set; }
     public FinancialDocumentEntity FinancialDocument { get; set; } = null!;
-    public string AdjustmentType { get; set; } = "Discount"; // Discount, Credit
+    public FinancialAdjustmentType AdjustmentType { get; set; } = FinancialAdjustmentType.Discount;
     public string Description { get; set; } = string.Empty;
     public long AmountCents { get; set; }
     public int? BasisPoints { get; set; }
@@ -146,7 +148,7 @@ public sealed class ReceiptEntity : AuditableSoftDeletableEntity
 public sealed class DocumentTemplateEntity : AuditableSoftDeletableEntity
 {
     public string Name { get; set; } = string.Empty;
-    public string DocumentType { get; set; } = "Invoice"; // Quote, Invoice
+    public FinancialDocumentType DocumentType { get; set; } = FinancialDocumentType.Invoice;
     public int Version { get; set; } = 1;
     public string StorageKey { get; set; } = string.Empty;
     public string PlaceholdersJson { get; set; } = "[]";
@@ -157,7 +159,7 @@ public sealed class DocumentTemplateEntity : AuditableSoftDeletableEntity
 public sealed class GeneratedArtifactEntity : AuditableSoftDeletableEntity
 {
     public Guid JobId { get; set; }
-    public string SourceType { get; set; } = string.Empty; // Quote, Invoice, MoodBoard
+    public ArtifactSourceType SourceType { get; set; }
     public Guid SourceId { get; set; }
     public string SourceVersion { get; set; } = string.Empty;
     public string Format { get; set; } = "Pdf"; // Docx, Pdf

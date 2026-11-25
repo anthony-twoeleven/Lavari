@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Lavari.Application.Abstractions;
 using Lavari.Application.Services;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Money;
 using Lavari.Domain.Security;
@@ -64,9 +65,9 @@ public sealed class ForecastingService : IForecastingService
 
             foreach (var doc in docs)
             {
-                if (doc.DocumentType == "Quote" && !_permissions.Has(ModuleKeys.Quotes, AccessLevel.Read)) continue;
-                if (doc.DocumentType == "Invoice" && !_permissions.Has(ModuleKeys.Invoices, AccessLevel.Read)) continue;
-                if (doc.DocumentType == "Quote" && convertedQuoteIds.Contains(doc.Id)) continue; // Avoid double-counting quote + resulting invoice
+                if (doc.DocumentType == FinancialDocumentType.Quote && !_permissions.Has(ModuleKeys.Quotes, AccessLevel.Read)) continue;
+                if (doc.DocumentType == FinancialDocumentType.Invoice && !_permissions.Has(ModuleKeys.Invoices, AccessLevel.Read)) continue;
+                if (doc.DocumentType == FinancialDocumentType.Quote && convertedQuoteIds.Contains(doc.Id)) continue; // Avoid double-counting quote + resulting invoice
 
                 var effDate = doc.IssueDate ?? doc.DueDate;
                 if (effDate is null)
@@ -78,7 +79,7 @@ public sealed class ForecastingService : IForecastingService
                 if (effDate.Value < request.StartDate || effDate.Value > request.EndDate) continue;
 
                 var amt = new MoneyCents(doc.AppliedTotalCents, currency);
-                var isActual = doc.DocumentType == "Invoice" && doc.Status == "Issued";
+                var isActual = doc.DocumentType == FinancialDocumentType.Invoice && doc.Status == "Issued";
 
                 if (isActual) actualRev = actualRev.Add(amt);
                 else plannedRev = plannedRev.Add(amt);
@@ -87,7 +88,7 @@ public sealed class ForecastingService : IForecastingService
                 {
                     JobId = doc.JobId,
                     JobName = jobs[doc.JobId].Name,
-                    SourceType = doc.DocumentType,
+                    SourceType = doc.DocumentType == FinancialDocumentType.Quote ? ForecastSourceType.Quote : ForecastSourceType.Invoice,
                     SourceId = doc.Id,
                     Label = $"{doc.DocumentNumber} ({doc.Status})",
                     EffectiveDate = effDate.Value,
@@ -125,7 +126,7 @@ public sealed class ForecastingService : IForecastingService
                     {
                         JobId = p.JobId,
                         JobName = jobs[p.JobId].Name,
-                        SourceType = "Procurement",
+                        SourceType = ForecastSourceType.Procurement,
                         SourceId = pay.Id,
                         Label = $"{p.SupplierName} — {pay.Description}",
                         EffectiveDate = payDate.Value,
@@ -149,7 +150,7 @@ public sealed class ForecastingService : IForecastingService
                         {
                             JobId = p.JobId,
                             JobName = jobs[p.JobId].Name,
-                            SourceType = "Procurement",
+                            SourceType = ForecastSourceType.Procurement,
                             SourceId = p.Id,
                             Label = $"{p.SupplierName} (Outstanding balance)",
                             EffectiveDate = expectedDate.Value,
@@ -198,7 +199,7 @@ public sealed class ForecastingService : IForecastingService
                 {
                     JobId = d.JobId,
                     JobName = jobs[d.JobId].Name,
-                    SourceType = "Milestone",
+                    SourceType = ForecastSourceType.Milestone,
                     SourceId = d.Id,
                     Label = d.Label,
                     EffectiveDate = effDate.Value,

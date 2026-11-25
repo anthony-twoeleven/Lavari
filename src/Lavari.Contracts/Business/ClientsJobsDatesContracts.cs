@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Contracts.Business;
 
 public sealed record ClientDto
@@ -100,7 +102,7 @@ public sealed record JobDateDto
     public long? ForecastAmountCents { get; init; }
     public string? ForecastCurrency { get; init; }
     public required string ForecastDirection { get; init; }
-    public string? LinkedEntityType { get; init; }
+    public JobDateLinkedEntityType? LinkedEntityType { get; init; }
     public Guid? LinkedEntityId { get; init; }
     public required string ConcurrencyToken { get; init; }
 }
@@ -118,7 +120,7 @@ public sealed record UpsertJobDateRequest
     public long? ForecastAmountCents { get; init; }
     public string? ForecastCurrency { get; init; }
     public string ForecastDirection { get; init; } = "None";
-    public string? LinkedEntityType { get; init; }
+    public JobDateLinkedEntityType? LinkedEntityType { get; init; }
     public Guid? LinkedEntityId { get; init; }
     public string? ConcurrencyToken { get; init; }
     public Guid? LeaseId { get; init; }

@@ -136,7 +136,7 @@ public static class LavariApiEndpoints
         });
 
         // --- Exclusive Edit Locks, Wait Queues & Notifications ---
-        api.MapGet("/locks/{recordType}/{recordId:guid}", (string recordType, Guid recordId, IEditLockService svc, CancellationToken ct) =>
+        api.MapGet("/locks/{recordType}/{recordId:guid}", (LockableRecordType recordType, Guid recordId, IEditLockService svc, CancellationToken ct) =>
             svc.GetStatusAsync(recordType, recordId, ct));
         api.MapPost("/locks/modify", (EditLockActionRequest req, IEditLockService svc, CancellationToken ct) =>
             svc.RequestModifyAsync(req.RecordType, req.RecordId, ct));
@@ -269,7 +269,7 @@ public static class LavariApiEndpoints
         api.MapPost("/mood-boards/{boardId:guid}/pdf", (Guid boardId, Guid? canvasId, IMoodBoardService svc, CancellationToken ct) => svc.SaveAsPdfAsync(boardId, canvasId, ct));
 
         // --- Quotes, Invoices, Procurement, Receipts & Artifacts ---
-        api.MapGet("/jobs/{jobId:guid}/documents", (Guid jobId, string? documentType, IFinancialDocumentService svc, CancellationToken ct) =>
+        api.MapGet("/jobs/{jobId:guid}/documents", (Guid jobId, FinancialDocumentType? documentType, IFinancialDocumentService svc, CancellationToken ct) =>
             svc.ListForJobAsync(jobId, documentType, ct));
         api.MapGet("/documents/{id:guid}", (Guid id, IFinancialDocumentService svc, CancellationToken ct) => svc.GetAsync(id, ct));
         api.MapPost("/documents", (CreateFinancialDocumentRequest req, IFinancialDocumentService svc, CancellationToken ct) => svc.CreateAsync(req, ct));
@@ -280,7 +280,7 @@ public static class LavariApiEndpoints
         api.MapPost("/documents/{id:guid}/issue", (Guid id, [FromQuery] string token, Guid? leaseId, long? fencingVersion, IFinancialDocumentService svc, CancellationToken ct) =>
             svc.IssueAsync(id, token, leaseId, fencingVersion, ct));
 
-        api.MapGet("/jobs/{jobId:guid}/artifacts", (Guid jobId, string? sourceType, Guid? sourceId, IFinancialDocumentService svc, CancellationToken ct) =>
+        api.MapGet("/jobs/{jobId:guid}/artifacts", (Guid jobId, ArtifactSourceType? sourceType, Guid? sourceId, IFinancialDocumentService svc, CancellationToken ct) =>
             svc.ListArtifactsAsync(jobId, sourceType, sourceId, ct));
         api.MapGet("/artifacts/{artifactId:guid}/download", async (Guid artifactId, IFinancialDocumentService svc, CancellationToken ct) =>
         {

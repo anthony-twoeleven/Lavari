@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using Lavari.Application.Formatting;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Infrastructure.Documents;
 using Lavari.Infrastructure.Media;
 using SkiaSharp;
@@ -30,7 +31,7 @@ public class MediaAndDocumentBenchmarks
             JobId = Guid.NewGuid(),
             JobName = "Benchmark Display Home",
             ClientName = "Benchmark Client Pty Ltd",
-            DocumentType = "Invoice",
+            DocumentType = FinancialDocumentType.Invoice,
             DocumentNumber = "INV-2026-0001",
             Status = "Draft",
             CalculationMode = "LineCalculated",
@@ -51,8 +52,8 @@ public class MediaAndDocumentBenchmarks
             ConcurrencyToken = "tok",
             Lines =
             [
-                new FinancialDocumentLineDto { Id = Guid.NewGuid(), LineSourceType = "Manual", Title = "Console Table", QuantityMilli = 1000, UnitLabel = "ea", UnitPriceCents = 150_000, LineTotalCents = 150_000, IsTaxable = true, SortOrder = 0 },
-                new FinancialDocumentLineDto { Id = Guid.NewGuid(), LineSourceType = "Manual", Title = "Lounge Sofa", QuantityMilli = 1000, UnitLabel = "ea", UnitPriceCents = 250_000, LineTotalCents = 250_000, IsTaxable = true, SortOrder = 1 }
+                new FinancialDocumentLineDto { Id = Guid.NewGuid(), LineSourceType = FinancialLineSourceType.Manual, Title = "Console Table", QuantityMilli = 1000, UnitLabel = "ea", UnitPriceCents = 150_000, LineTotalCents = 150_000, IsTaxable = true, SortOrder = 0 },
+                new FinancialDocumentLineDto { Id = Guid.NewGuid(), LineSourceType = FinancialLineSourceType.Manual, Title = "Lounge Sofa", QuantityMilli = 1000, UnitLabel = "ea", UnitPriceCents = 250_000, LineTotalCents = 250_000, IsTaxable = true, SortOrder = 1 }
             ],
             Adjustments = []
         };

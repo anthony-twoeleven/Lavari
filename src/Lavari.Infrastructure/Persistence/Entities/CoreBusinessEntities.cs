@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Infrastructure.Persistence.Entities;
 
 public sealed class ClientEntity : AuditableSoftDeletableEntity
@@ -39,7 +41,7 @@ public sealed class JobEntity : AuditableSoftDeletableEntity
 
 public sealed class EditLeaseEntity : AuditableSoftDeletableEntity
 {
-    public string RecordType { get; set; } = string.Empty; // Job, Quote, Invoice
+    public LockableRecordType RecordType { get; set; }
     public Guid RecordId { get; set; }
     public Guid ActorId { get; set; }
     public string ActorDisplayName { get; set; } = string.Empty;
@@ -54,7 +56,7 @@ public sealed class EditLeaseEntity : AuditableSoftDeletableEntity
 
 public sealed class EditQueueEntryEntity : AuditableSoftDeletableEntity
 {
-    public string RecordType { get; set; } = string.Empty;
+    public LockableRecordType RecordType { get; set; }
     public Guid RecordId { get; set; }
     public Guid ActorId { get; set; }
     public string ActorDisplayName { get; set; } = string.Empty;
@@ -71,7 +73,7 @@ public sealed class InAppNotificationEntity : AuditableSoftDeletableEntity
     public string Category { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
-    public string? RecordType { get; set; }
+    public LockableRecordType? RecordType { get; set; }
     public Guid? RecordId { get; set; }
     public Guid? ReferenceId { get; set; }
     public bool IsRead { get; set; }

@@ -221,7 +221,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleKeys.JobLineItems, AccessLevel.Alter);
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, jobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, jobId, request.LeaseId, request.FencingVersion, ct);
 
         ValidateLineItemRequest(request);
         if (!await _db.Jobs.AnyAsync(j => j.Id == jobId, ct))
@@ -263,7 +263,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         var entity = await _db.JobLineItems.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new NotFoundServiceException("Job line item not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, entity.JobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, entity.JobId, request.LeaseId, request.FencingVersion, ct);
         ValidateLineItemRequest(request);
 
         if (!string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
@@ -299,7 +299,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         var entity = await _db.JobLineItems.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new NotFoundServiceException("Job line item not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, entity.JobId, leaseId, fencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, entity.JobId, leaseId, fencingVersion, ct);
         if (!string.Equals(entity.ConcurrencyToken, concurrencyToken, StringComparison.Ordinal))
         {
             throw new ConflictServiceException("Line item was modified by another user.");

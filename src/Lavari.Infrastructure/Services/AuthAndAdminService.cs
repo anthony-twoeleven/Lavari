@@ -483,7 +483,7 @@ public sealed class AdminService : IAdminService
         }
 
         var key = request.Key.Trim();
-        var valueType = request.ValueType.Trim().ToLowerInvariant();
+        var valueType = request.ValueType;
         ValidateTypedVariableValue(valueType, request.Value);
 
         var existing = await _db.ApplicationVariables.FirstOrDefaultAsync(x => x.Key == key, ct);
@@ -721,29 +721,29 @@ public sealed class AdminService : IAdminService
         }
     }
 
-    private static void ValidateTypedVariableValue(string valueType, string value)
+    private static void ValidateTypedVariableValue(ApplicationVariableValueType valueType, string value)
     {
         switch (valueType)
         {
-            case "int":
+            case ApplicationVariableValueType.Int:
                 if (!int.TryParse(value, out _))
                 {
                     throw new ValidationServiceException("Variable value must be a valid integer.");
                 }
                 break;
-            case "bool":
+            case ApplicationVariableValueType.Bool:
                 if (!bool.TryParse(value, out _))
                 {
                     throw new ValidationServiceException("Variable value must be 'true' or 'false'.");
                 }
                 break;
-            case "email":
+            case ApplicationVariableValueType.Email:
                 if (!value.Contains('@', StringComparison.Ordinal) || value.Contains(' ', StringComparison.Ordinal))
                 {
                     throw new ValidationServiceException("Variable value must be a valid email address.");
                 }
                 break;
-            case "url":
+            case ApplicationVariableValueType.Url:
                 if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                 {
                     throw new ValidationServiceException("Variable value must be a valid http/https URL.");

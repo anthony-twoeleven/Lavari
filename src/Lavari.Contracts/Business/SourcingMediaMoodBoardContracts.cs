@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Contracts.Business;
 
 public sealed record ProductAttributeDto
@@ -129,7 +131,7 @@ public sealed record ImageAssociationDto
     public Guid? ProductId { get; init; }
     public Guid? MoodBoardId { get; init; }
     public Guid? ReceiptId { get; init; }
-    public required string AssociationType { get; init; }
+    public required ImageAssociationType AssociationType { get; init; }
 }
 
 public sealed record ImageAssetDto
@@ -167,7 +169,7 @@ public sealed record ImageLibraryFilterRequest
 public sealed record MoodBoardElementDto
 {
     public required Guid Id { get; init; }
-    public required string ElementType { get; init; }
+    public required MoodBoardElementType ElementType { get; init; }
     public Guid? ImageAssetId { get; init; }
     public string? TextContent { get; init; }
     public required int FontSizePx { get; init; }

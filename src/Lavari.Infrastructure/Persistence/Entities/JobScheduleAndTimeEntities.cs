@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Infrastructure.Persistence.Entities;
 
 public sealed class JobDateEntity : AuditableSoftDeletableEntity
@@ -15,7 +17,7 @@ public sealed class JobDateEntity : AuditableSoftDeletableEntity
     public long? ForecastAmountCents { get; set; }
     public string? ForecastCurrency { get; set; }
     public string ForecastDirection { get; set; } = "None"; // None, Cost, Revenue
-    public string? LinkedEntityType { get; set; }
+    public JobDateLinkedEntityType? LinkedEntityType { get; set; }
     public Guid? LinkedEntityId { get; set; }
 }
 
@@ -26,7 +28,7 @@ public sealed class TimeEntryEntity : AuditableSoftDeletableEntity
     public Guid WorkerUserId { get; set; }
     public string WorkerDisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public string SourceType { get; set; } = "Timer"; // Timer, FlatDuration, TimeRange
+    public TimeEntrySourceType SourceType { get; set; } = TimeEntrySourceType.Timer;
     public string State { get; set; } = "Running"; // Running, Paused, Stopped, Cancelled
     public bool IsBillable { get; set; } = true;
     public DateOnly WorkDate { get; set; }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lavari.Application.Abstractions;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
 using Lavari.Infrastructure.Persistence.Entities;
@@ -234,25 +235,25 @@ public sealed class DatabaseSeeder
 
     private async Task SeedApplicationVariablesAsync(CancellationToken ct)
     {
-        var defaults = new (string Key, string Type, string Value, string Description)[]
+        var defaults = new (string Key, ApplicationVariableValueType Type, string Value, string Description)[]
         {
-            ("Company.Name", "string", "Lavari Interior Design", "Firm display name used on branding and documents."),
-            ("Company.Abn", "string", "00 000 000 000", "Business ABN displayed on quotes and invoices."),
-            ("Company.ContactEmail", "email", "hello@lavari.com.au", "Primary firm contact email address."),
-            ("Company.WebsiteUrl", "url", "https://lavari.com.au", "Public firm website link."),
-            ("Company.BrandPrimaryHex", "string", "#6750A4", "Primary company brand color for mood board canvases."),
-            ("Company.BrandSurfaceHex", "string", "#F9F7F4", "Default mood board canvas surface background color."),
-            ("Company.BrandTextHex", "string", "#1F1B16", "Default company brand typography color."),
-            ("Finance.DefaultCurrency", "string", "AUD", "Default two-decimal ISO currency code."),
-            ("Finance.DefaultTaxBasisPoints", "int", "1000", "Default GST tax rate in basis points (1000 = 10%)."),
-            ("Finance.DefaultTaxLabel", "string", "10% GST", "Default tax line label for quotes and invoices."),
-            ("Finance.DefaultDepositBasisPoints", "int", "7000", "Default deposit percentage in basis points (7000 = 70%)."),
-            ("Finance.DefaultDepositLabel", "string", "70% DEPOSIT REQUIRED", "Default deposit label on invoices."),
-            ("Finance.PaymentDetails", "string", "Configure payment details in Application Variables", "Payment instructions displayed on invoices."),
-            ("Finance.PaymentTerms", "string", "7 day payment terms", "Standard payment terms line."),
-            ("Time.DefaultJobTimeZone", "string", "Australia/Sydney", "Default IANA time zone for new jobs."),
-            ("Lock.LeaseDurationSeconds", "int", "300", "Exclusive Modify edit lease duration in seconds."),
-            ("Lock.ReservationClaimSeconds", "int", "120", "Queued editor turn claim reservation window in seconds.")
+            ("Company.Name", ApplicationVariableValueType.String, "Lavari Interior Design", "Firm display name used on branding and documents."),
+            ("Company.Abn", ApplicationVariableValueType.String, "00 000 000 000", "Business ABN displayed on quotes and invoices."),
+            ("Company.ContactEmail", ApplicationVariableValueType.Email, "hello@lavari.com.au", "Primary firm contact email address."),
+            ("Company.WebsiteUrl", ApplicationVariableValueType.Url, "https://lavari.com.au", "Public firm website link."),
+            ("Company.BrandPrimaryHex", ApplicationVariableValueType.String, "#6750A4", "Primary company brand color for mood board canvases."),
+            ("Company.BrandSurfaceHex", ApplicationVariableValueType.String, "#F9F7F4", "Default mood board canvas surface background color."),
+            ("Company.BrandTextHex", ApplicationVariableValueType.String, "#1F1B16", "Default company brand typography color."),
+            ("Finance.DefaultCurrency", ApplicationVariableValueType.String, "AUD", "Default two-decimal ISO currency code."),
+            ("Finance.DefaultTaxBasisPoints", ApplicationVariableValueType.Int, "1000", "Default GST tax rate in basis points (1000 = 10%)."),
+            ("Finance.DefaultTaxLabel", ApplicationVariableValueType.String, "10% GST", "Default tax line label for quotes and invoices."),
+            ("Finance.DefaultDepositBasisPoints", ApplicationVariableValueType.Int, "7000", "Default deposit percentage in basis points (7000 = 70%)."),
+            ("Finance.DefaultDepositLabel", ApplicationVariableValueType.String, "70% DEPOSIT REQUIRED", "Default deposit label on invoices."),
+            ("Finance.PaymentDetails", ApplicationVariableValueType.String, "Configure payment details in Application Variables", "Payment instructions displayed on invoices."),
+            ("Finance.PaymentTerms", ApplicationVariableValueType.String, "7 day payment terms", "Standard payment terms line."),
+            ("Time.DefaultJobTimeZone", ApplicationVariableValueType.String, "Australia/Sydney", "Default IANA time zone for new jobs."),
+            ("Lock.LeaseDurationSeconds", ApplicationVariableValueType.Int, "300", "Exclusive Modify edit lease duration in seconds."),
+            ("Lock.ReservationClaimSeconds", ApplicationVariableValueType.Int, "120", "Queued editor turn claim reservation window in seconds.")
         };
 
         var existingKeys = await _db.ApplicationVariables
@@ -355,10 +356,10 @@ public sealed class DatabaseSeeder
 
     private async Task SeedDocumentTemplatesAsync(string templatesDirectory, CancellationToken ct)
     {
-        var templates = new (string FileName, string Name, string DocType)[]
+        var templates = new (string FileName, string Name, FinancialDocumentType DocType)[]
         {
-            ("Lavari-Invoice-Template.docx", "Lavari Standard Invoice", "Invoice"),
-            ("Lavari-Quote-Template.docx", "Lavari Standard Quote", "Quote")
+            ("Lavari-Invoice-Template.docx", "Lavari Standard Invoice", FinancialDocumentType.Invoice),
+            ("Lavari-Quote-Template.docx", "Lavari Standard Quote", FinancialDocumentType.Quote)
         };
 
         var standardPlaceholders = JsonSerializer.Serialize(new[]

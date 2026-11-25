@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Lavari.Contracts.Common;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Images;
 using Lavari.Domain.Money;
@@ -102,5 +104,15 @@ public sealed class DomainCoreTests
         var result = ImageResizePolicy.CalculateMax1080pSize(inW, inH);
         Assert.Equal(expW, result.Width);
         Assert.Equal(expH, result.Height);
+    }
+
+    [Fact]
+    public void TypeEnums_SerializeAndDeserializeAsReadableStrings()
+    {
+        var json = JsonSerializer.Serialize(FinancialDocumentType.Invoice);
+        Assert.Equal("\"Invoice\"", json);
+        Assert.Equal(FinancialDocumentType.Invoice, JsonSerializer.Deserialize<FinancialDocumentType>(json));
+        Assert.Equal(LockableRecordType.Quote, JsonSerializer.Deserialize<LockableRecordType>("\"Quote\""));
+        Assert.Equal(FinancialAdjustmentType.Credit, JsonSerializer.Deserialize<FinancialAdjustmentType>("\"Credit\""));
     }
 }

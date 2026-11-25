@@ -172,7 +172,7 @@ public sealed class ImageLibraryService : IImageLibraryService
                     JobId = jobId,
                     ProductId = productId,
                     MoodBoardId = moodBoardId,
-                    AssociationType = moodBoardId.HasValue ? "MoodBoard" : productId.HasValue ? "Product" : jobId.HasValue ? "Job" : "Client"
+                    AssociationType = moodBoardId.HasValue ? ImageAssociationType.MoodBoard : productId.HasValue ? ImageAssociationType.Product : jobId.HasValue ? ImageAssociationType.Job : ImageAssociationType.Client
                 });
             }
 
@@ -192,7 +192,7 @@ public sealed class ImageLibraryService : IImageLibraryService
         }
     }
 
-    public async Task<ImageAssetDto> AddAssociationAsync(Guid imageAssetId, Guid? clientId, Guid? jobId, Guid? productId, string associationType, CancellationToken ct = default)
+    public async Task<ImageAssetDto> AddAssociationAsync(Guid imageAssetId, Guid? clientId, Guid? jobId, Guid? productId, ImageAssociationType associationType, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.ImageLibrary, AccessLevel.Alter);
         var asset = await _db.ImageAssets.Include(x => x.Associations).FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
@@ -214,7 +214,7 @@ public sealed class ImageLibraryService : IImageLibraryService
             ClientId = resolvedClientId,
             JobId = jobId,
             ProductId = productId,
-            AssociationType = string.IsNullOrWhiteSpace(associationType) ? "Library" : associationType.Trim()
+            AssociationType = associationType
         });
         await _db.SaveChangesAsync(ct);
 
@@ -638,7 +638,7 @@ public sealed class MoodBoardService : IMoodBoardService
         {
             Id = _ids.NewId(),
             JobId = boardDto.JobId,
-            SourceType = "MoodBoard",
+            SourceType = ArtifactSourceType.MoodBoard,
             SourceId = boardDto.Id,
             SourceVersion = string.Join(",", selectedCanvases.Select(c => $"{c.Id:N}:{c.ConcurrencyToken}")),
             Format = "Pdf",

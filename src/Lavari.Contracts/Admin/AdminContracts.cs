@@ -1,3 +1,5 @@
+using Lavari.Contracts.Common;
+
 namespace Lavari.Contracts.Admin;
 
 public sealed record AuditEntryDto
@@ -20,7 +22,7 @@ public sealed record ApplicationVariableDto
 {
     public required Guid Id { get; init; }
     public required string Key { get; init; }
-    public required string ValueType { get; init; }
+    public required ApplicationVariableValueType ValueType { get; init; }
     public required string Value { get; init; }
     public required string Description { get; init; }
     public string? ValidationRule { get; init; }
@@ -31,7 +33,7 @@ public sealed record ApplicationVariableDto
 public sealed record UpsertApplicationVariableRequest
 {
     public required string Key { get; init; }
-    public required string ValueType { get; init; }
+    public required ApplicationVariableValueType ValueType { get; init; }
     public required string Value { get; init; }
     public required string Description { get; init; }
     public string? ValidationRule { get; init; }

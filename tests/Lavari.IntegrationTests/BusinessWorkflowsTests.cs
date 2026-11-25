@@ -4,6 +4,7 @@ using Lavari.Application.Abstractions;
 using Lavari.Application.Formatting;
 using Lavari.Application.Security;
 using Lavari.Contracts.Business;
+using Lavari.Contracts.Common;
 using Lavari.Contracts.Locking;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
@@ -210,8 +211,8 @@ public sealed class BusinessWorkflowsTests : IDisposable
             ConcurrencyToken = canvas1.ConcurrencyToken,
             Elements =
             [
-                new MoodBoardElementDto { Id = Guid.Empty, ElementType = "Image", ImageAssetId = uploadedLand.Id, FontSizePx = 16, TextColorHex = "#1F1B16", X = 40, Y = 40, Width = 600, Height = 450, ZIndex = 1 },
-                new MoodBoardElementDto { Id = Guid.Empty, ElementType = "Text", TextContent = "Warm travertine & linen palette", FontSizePx = 28, TextColorHex = "#1F1B16", X = 700, Y = 60, Width = 500, Height = 80, ZIndex = 2 }
+                new MoodBoardElementDto { Id = Guid.Empty, ElementType = MoodBoardElementType.Image, ImageAssetId = uploadedLand.Id, FontSizePx = 16, TextColorHex = "#1F1B16", X = 40, Y = 40, Width = 600, Height = 450, ZIndex = 1 },
+                new MoodBoardElementDto { Id = Guid.Empty, ElementType = MoodBoardElementType.Text, TextContent = "Warm travertine & linen palette", FontSizePx = 28, TextColorHex = "#1F1B16", X = 700, Y = 60, Width = 500, Height = 80, ZIndex = 2 }
             ]
         });
 
@@ -239,7 +240,7 @@ public sealed class BusinessWorkflowsTests : IDisposable
         var quote = await h.Finance.CreateAsync(new CreateFinancialDocumentRequest
         {
             JobId = job.Id,
-            DocumentType = "Quote",
+            DocumentType = FinancialDocumentType.Quote,
             IssueDate = new DateOnly(2026, 11, 25),
             Lines =
             [
@@ -248,7 +249,7 @@ public sealed class BusinessWorkflowsTests : IDisposable
             ],
             Adjustments =
             [
-                new SaveFinancialDocumentAdjustmentInput { AdjustmentType = "Discount", Description = "Trade loyalty", AmountCents = 19_400, IsPreTax = true }
+                new SaveFinancialDocumentAdjustmentInput { AdjustmentType = FinancialAdjustmentType.Discount, Description = "Trade loyalty", AmountCents = 19_400, IsPreTax = true }
             ]
         });
 
@@ -257,7 +258,7 @@ public sealed class BusinessWorkflowsTests : IDisposable
         Assert.Equal(440_000, quote.AppliedTotalCents);
 
         // Acquire Modify lock on quote before editing
-        var lockStatus = await h.Locks.RequestModifyAsync(LockableRecordTypes.Quote, quote.Id);
+        var lockStatus = await h.Locks.RequestModifyAsync(LockableRecordType.Quote, quote.Id);
         Assert.True(lockStatus.IsHeldByCurrentSession);
 
         // Updating total without confirmation triggers warning!
@@ -309,7 +310,7 @@ public sealed class BusinessWorkflowsTests : IDisposable
 
         // Convert quote to invoice, generate Word .docx & PDF, and Issue!
         var invoice = await h.Finance.ConvertQuoteToInvoiceAsync(quote.Id);
-        var invLock = await h.Locks.RequestModifyAsync(LockableRecordTypes.Invoice, invoice.Id);
+        var invLock = await h.Locks.RequestModifyAsync(LockableRecordType.Invoice, invoice.Id);
         var issued = await h.Finance.IssueAsync(invoice.Id, invoice.ConcurrencyToken, invLock.LeaseId, invLock.FencingVersion);
         Assert.Equal("Issued", issued.Status);
         Assert.NotNull(issued.ApprovedWordArtifactId);

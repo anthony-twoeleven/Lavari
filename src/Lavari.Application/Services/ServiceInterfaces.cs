@@ -136,7 +136,7 @@ public interface IImageLibraryService
         ReadOnlyMemory<byte> rawBytes,
         string? declaredContentType,
         CancellationToken ct = default);
-    Task<ImageAssetDto> AddAssociationAsync(Guid imageAssetId, Guid? clientId, Guid? jobId, Guid? productId, string associationType, CancellationToken ct = default);
+    Task<ImageAssetDto> AddAssociationAsync(Guid imageAssetId, Guid? clientId, Guid? jobId, Guid? productId, ImageAssociationType associationType, CancellationToken ct = default);
     Task<(byte[] Bytes, string ContentType)> ReadImageBytesAsync(Guid imageAssetId, bool thumbnail, CancellationToken ct = default);
     Task SoftDeleteAsync(Guid imageAssetId, string concurrencyToken, CancellationToken ct = default);
     Task RestoreAsync(Guid imageAssetId, string concurrencyToken, CancellationToken ct = default);
@@ -157,7 +157,7 @@ public interface IMoodBoardService
 
 public interface IFinancialDocumentService
 {
-    Task<IReadOnlyList<FinancialDocumentDto>> ListForJobAsync(Guid jobId, string? documentType = null, CancellationToken ct = default);
+    Task<IReadOnlyList<FinancialDocumentDto>> ListForJobAsync(Guid jobId, FinancialDocumentType? documentType = null, CancellationToken ct = default);
     Task<FinancialDocumentDto> GetAsync(Guid documentId, CancellationToken ct = default);
     Task<FinancialDocumentDto> CreateAsync(CreateFinancialDocumentRequest request, CancellationToken ct = default);
     Task<UpdateFinancialDocumentResultDto> UpdateAsync(Guid documentId, UpdateFinancialDocumentRequest request, CancellationToken ct = default);
@@ -165,7 +165,7 @@ public interface IFinancialDocumentService
     Task<GeneratedArtifactDto> GenerateDocxAsync(Guid documentId, bool isDraft, CancellationToken ct = default);
     Task<GeneratedArtifactDto> SaveAsPdfAsync(Guid documentId, bool isDraft, CancellationToken ct = default);
     Task<FinancialDocumentDto> IssueAsync(Guid documentId, string concurrencyToken, Guid? leaseId, long? fencingVersion, CancellationToken ct = default);
-    Task<IReadOnlyList<GeneratedArtifactDto>> ListArtifactsAsync(Guid jobId, string? sourceType = null, Guid? sourceId = null, CancellationToken ct = default);
+    Task<IReadOnlyList<GeneratedArtifactDto>> ListArtifactsAsync(Guid jobId, ArtifactSourceType? sourceType = null, Guid? sourceId = null, CancellationToken ct = default);
     Task<(byte[] Bytes, string ContentType, string FileName)> DownloadArtifactAsync(Guid artifactId, CancellationToken ct = default);
 
     Task<IReadOnlyList<ProcurementItemDto>> ListProcurementAsync(Guid jobId, CancellationToken ct = default);

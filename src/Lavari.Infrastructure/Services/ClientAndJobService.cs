@@ -459,7 +459,7 @@ public sealed class ClientAndJobService : IClientAndJobService
     public async Task<JobDto> UpdateJobAsync(Guid id, UpsertJobRequest request, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Alter);
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, id, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, id, request.LeaseId, request.FencingVersion, ct);
 
         if (string.IsNullOrWhiteSpace(request.Name))
         {
@@ -588,7 +588,7 @@ public sealed class JobDateService : IJobDateService
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleKeys.JobDates, AccessLevel.Alter);
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, jobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, jobId, request.LeaseId, request.FencingVersion, ct);
 
         ValidateJobDate(request);
         if (!await _db.Jobs.AnyAsync(j => j.Id == jobId, ct))
@@ -625,7 +625,7 @@ public sealed class JobDateService : IJobDateService
         var entity = await _db.JobDates.FirstOrDefaultAsync(d => d.Id == id, ct)
             ?? throw new NotFoundServiceException("Job date/milestone not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, entity.JobId, request.LeaseId, request.FencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, entity.JobId, request.LeaseId, request.FencingVersion, ct);
         ValidateJobDate(request);
 
         if (!string.Equals(entity.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
@@ -657,7 +657,7 @@ public sealed class JobDateService : IJobDateService
         var entity = await _db.JobDates.FirstOrDefaultAsync(d => d.Id == id, ct)
             ?? throw new NotFoundServiceException("Job date/milestone not found.");
 
-        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordTypes.Job, entity.JobId, leaseId, fencingVersion, ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, entity.JobId, leaseId, fencingVersion, ct);
 
         if (!string.Equals(entity.ConcurrencyToken, concurrencyToken, StringComparison.Ordinal))
         {
