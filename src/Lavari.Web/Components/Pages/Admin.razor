@@ -1,0 +1,293 @@
+@page "/admin"
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+
+<h1 style="margin:0;font-size:1.5rem">Studio Administration</h1>
+<LvErrorBanner Error="_error" />
+@if (!string.IsNullOrWhiteSpace(_notice))
+{
+    <div class="lv-banner-success">@_notice</div>
+}
+
+<div class="lv-tabs">
+    <LvButton Variant="@(_tab == "variables" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("variables")'>App Variables</LvButton>
+    <LvButton Variant="@(_tab == "users" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("users")'>Users</LvButton>
+    <LvButton Variant="@(_tab == "roles" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("roles")'>Roles &amp; Permissions</LvButton>
+    <LvButton Variant="@(_tab == "errors" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("errors")'>Error Catalog &amp; Logs</LvButton>
+    <LvButton Variant="@(_tab == "audit" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("audit")'>Audit History</LvButton>
+    <LvButton Variant="@(_tab == "system" ? "filled" : "outlined")" Small="true" OnClick='() => SwitchTabAsync("system")'>Cache &amp; Integrations</LvButton>
+</div>
+
+@if (_tab == "variables")
+{
+    <LvCard Title="Application Variables" Subtitle="Changeable non-secret business values (company branding, payment details, lock timers, tax rates)">
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Key</th><th>Type</th><th>Value</th><th>Description</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var v in _variables)
+                    {
+                        <tr>
+                            <td><code>@v.Key</code></td>
+                            <td><LvBadge>@v.ValueType</LvBadge></td>
+                            <td><input class="lv-input" value="@_varEdits[v.Key]" @oninput="e => _varEdits[v.Key] = e.Value?.ToString() ?? string.Empty" /></td>
+                            <td><small>@v.Description</small></td>
+                            <td>
+                                <LvButton Small="true" Disabled="@(_varEdits[v.Key] == v.Value)" OnClick="() => SaveVariableAsync(v)">Save</LvButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+}
+else if (_tab == "users")
+{
+    <LvCard Title="Users">
+        <HeaderActions>
+            @if (AppState.Can(ModuleKeys.Users, AccessLevel.Alter))
+            {
+                <LvButton Small="true" OnClick="() => _showNewUser = true">+ Create User</LvButton>
+            }
+        </HeaderActions>
+        <ChildContent>
+            <div class="lv-table-wrap">
+                <table class="lv-table">
+                    <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th></tr></thead>
+                    <tbody>
+                        @foreach (var u in _users)
+                        {
+                            <tr>
+                                <td><strong>@u.DisplayName</strong></td>
+                                <td>@u.Email</td>
+                                <td>@string.Join(", ", u.RoleNames)</td>
+                                <td><LvBadge Tone="@(u.IsActive ? "success" : "error")">@(u.IsActive ? "Active" : "Disabled")</LvBadge></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </ChildContent>
+    </LvCard>
+}
+else if (_tab == "roles")
+{
+    <LvCard Title="Roles &amp; Module Permission Matrix" Subtitle="Levels: 0 = None, 1 = Read, 2 = Alter, 3 = Delete">
+        @foreach (var r in _roles)
+        {
+            <div class="lv-card lv-card-tonal" style="margin-bottom:12px">
+                <div class="lv-row" style="justify-content:space-between">
+                    <strong>@r.Name</strong>
+                    <LvBadge Tone="@(r.IsFullAccess ? "primary" : "neutral")">@(r.IsFullAccess ? "Wildcard Full Access" : $"{r.ModulePermissions.Count} module grants")</LvBadge>
+                </div>
+                <p style="margin:4px 0;font-size:0.85rem">@r.Description</p>
+                @if (!r.IsFullAccess)
+                {
+                    <div class="lv-row" style="margin-top:8px">
+                        @foreach (var kv in r.ModulePermissions.OrderBy(x => x.Key))
+                        {
+                            <LvBadge>@kv.Key: @((AccessLevel)kv.Value)</LvBadge>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </LvCard>
+}
+else if (_tab == "errors")
+{
+    <LvCard Title="Recent Operational Error Occurrences">
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Time (UTC)</th><th>Code</th><th>Correlation ID</th><th>Path</th><th>Detail</th></tr></thead>
+                <tbody>
+                    @foreach (var e in _errorOccurrences)
+                    {
+                        <tr>
+                            <td><small>@e.OccurredAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</small></td>
+                            <td><code>@e.ErrorCode</code></td>
+                            <td><code>@e.CorrelationId</code></td>
+                            <td><small>@e.RequestPath</small></td>
+                            <td><small>@e.SanitizedTechnicalDetail</small></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+}
+else if (_tab == "audit")
+{
+    <LvCard Title="Append-Only Audit Trail">
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Time (UTC)</th><th>Entity</th><th>Operation</th><th>Actor</th><th>Correlation</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _audits)
+                    {
+                        <tr>
+                            <td><small>@a.OccurredAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</small></td>
+                            <td>@a.EntityType <small>(@a.EntityId[..Math.Min(8, a.EntityId.Length)])</small></td>
+                            <td><LvBadge Tone="primary">@a.Operation</LvBadge></td>
+                            <td>@a.ActorDisplayName</td>
+                            <td><code>@a.CorrelationId[..Math.Min(8, a.CorrelationId.Length)]</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+}
+else if (_tab == "system")
+{
+    <div class="lv-grid-2">
+        <LvCard Title="In-Memory Cache Service">
+            @if (_cacheStats is not null)
+            {
+                <div class="lv-grid-2" style="margin-bottom:12px">
+                    <div><strong>Hits:</strong> @_cacheStats.Hits</div>
+                    <div><strong>Misses:</strong> @_cacheStats.Misses</div>
+                    <div><strong>Invalidations:</strong> @_cacheStats.Invalidations</div>
+                    <div><strong>Entries:</strong> @_cacheStats.CurrentEntryCount</div>
+                </div>
+            }
+            <LvButton Variant="tonal" OnClick="ClearCacheAsync">Clear Application Cache</LvButton>
+        </LvCard>
+        <LvCard Title="Gmail &amp; Gemini Integrations">
+            @if (_integrations is not null)
+            {
+                <p><strong>Gmail Configured:</strong> @_integrations.GmailConfigured</p>
+                <p><strong>Gemini LLM Configured:</strong> @_integrations.GeminiConfigured (@_integrations.GeminiModel)</p>
+                <p style="font-size:0.86rem;color:var(--md-sys-color-on-surface-variant)">@_integrations.StatusSummary</p>
+            }
+        </LvCard>
+    </div>
+}
+
+<LvDialog Open="_showNewUser" Title="Create User" OnClose="() => _showNewUser = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <LvTextField Label="Email" InputType="email" Required="true" Value="@_newEmail" ValueChanged="v => _newEmail = v ?? string.Empty" />
+            <LvTextField Label="Display Name" Required="true" Value="@_newDisplayName" ValueChanged="v => _newDisplayName = v ?? string.Empty" />
+            <LvTextField Label="Password (min 8 chars)" InputType="password" Required="true" Value="@_newPassword" ValueChanged="v => _newPassword = v ?? string.Empty" />
+            <div class="lv-field">
+                <label class="lv-label">Initial Role</label>
+                <select class="lv-select" @bind="_newRoleId">
+                    @foreach (var r in _roles) { <option value="@r.Id">@r.Name</option> }
+                </select>
+            </div>
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showNewUser = false">Cancel</LvButton>
+        <LvButton Disabled="@(string.IsNullOrWhiteSpace(_newEmail) || string.IsNullOrWhiteSpace(_newDisplayName) || _newPassword.Length < 8)" OnClick="CreateUserAsync">Create User</LvButton>
+    </Actions>
+</LvDialog>
+
+@code {
+    private string _tab = "variables";
+    private ApiErrorResponse? _error;
+    private string? _notice;
+
+    private List<ApplicationVariableDto> _variables = [];
+    private Dictionary<string, string> _varEdits = new(StringComparer.Ordinal);
+    private List<UserAdminDto> _users = [];
+    private List<RoleDto> _roles = [];
+    private List<OperationalErrorOccurrenceDto> _errorOccurrences = [];
+    private List<AuditEntryDto> _audits = [];
+    private Lavari.Contracts.Caching.CacheStatisticsSnapshot? _cacheStats;
+    private IntegrationStatusDto? _integrations;
+
+    private bool _showNewUser;
+    private string _newEmail = string.Empty;
+    private string _newDisplayName = string.Empty;
+    private string _newPassword = string.Empty;
+    private Guid _newRoleId;
+
+    protected override Task OnInitializedAsync() => SwitchTabAsync("variables");
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _tab = tab;
+        _error = null;
+        _notice = null;
+        if (tab == "variables")
+        {
+            var r = await Api.GetAsync<List<ApplicationVariableDto>>("/api/admin/variables");
+            if (r.IsSuccess && r.Data is not null)
+            {
+                _variables = r.Data;
+                _varEdits = _variables.ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+            }
+            else _error = r.Error;
+        }
+        else if (tab == "users")
+        {
+            var r = await Api.GetAsync<PagedResult<UserAdminDto>>("/api/admin/users?page=1&pageSize=100");
+            if (r.IsSuccess && r.Data is not null) _users = r.Data.Items.ToList(); else _error = r.Error;
+            var rr = await Api.GetAsync<List<RoleDto>>("/api/admin/roles");
+            if (rr.IsSuccess && rr.Data is not null) { _roles = rr.Data; _newRoleId = _roles.FirstOrDefault()?.Id ?? Guid.Empty; }
+        }
+        else if (tab == "roles")
+        {
+            var r = await Api.GetAsync<List<RoleDto>>("/api/admin/roles");
+            if (r.IsSuccess && r.Data is not null) _roles = r.Data; else _error = r.Error;
+        }
+        else if (tab == "errors")
+        {
+            var r = await Api.GetAsync<PagedResult<OperationalErrorOccurrenceDto>>("/api/admin/error-occurrences?page=1&pageSize=50");
+            if (r.IsSuccess && r.Data is not null) _errorOccurrences = r.Data.Items.ToList(); else _error = r.Error;
+        }
+        else if (tab == "audit")
+        {
+            var r = await Api.GetAsync<PagedResult<AuditEntryDto>>("/api/admin/audit?page=1&pageSize=50");
+            if (r.IsSuccess && r.Data is not null) _audits = r.Data.Items.ToList(); else _error = r.Error;
+        }
+        else if (tab == "system")
+        {
+            var c = await Api.GetAsync<Lavari.Contracts.Caching.CacheStatisticsSnapshot>("/api/admin/cache/stats");
+            if (c.IsSuccess) _cacheStats = c.Data;
+            var i = await Api.GetAsync<IntegrationStatusDto>("/api/integrations/status");
+            if (i.IsSuccess) _integrations = i.Data;
+        }
+    }
+
+    private async Task SaveVariableAsync(ApplicationVariableDto v)
+    {
+        var resp = await Api.PutAsync<ApplicationVariableDto>("/api/admin/variables", new UpsertApplicationVariableRequest
+        {
+            Key = v.Key,
+            ValueType = v.ValueType,
+            Value = _varEdits[v.Key],
+            Description = v.Description,
+            ValidationRule = v.ValidationRule,
+            ConcurrencyToken = v.ConcurrencyToken
+        });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _notice = $"Saved '{v.Key}' and invalidated cache.";
+        await SwitchTabAsync("variables");
+    }
+
+    private async Task CreateUserAsync()
+    {
+        var resp = await Api.PostAsync<UserAdminDto>("/api/admin/users", new CreateUserRequest
+        {
+            Email = _newEmail,
+            DisplayName = _newDisplayName,
+            Password = _newPassword,
+            RoleIds = _newRoleId == Guid.Empty ? [] : [_newRoleId]
+        });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _showNewUser = false;
+        _newEmail = string.Empty; _newDisplayName = string.Empty; _newPassword = string.Empty;
+        _notice = "User created.";
+        await SwitchTabAsync("users");
+    }
+
+    private async Task ClearCacheAsync()
+    {
+        var resp = await Api.PostAsync<Lavari.Contracts.Caching.CacheStatisticsSnapshot>("/api/admin/cache/clear");
+        if (resp.IsSuccess) { _cacheStats = resp.Data; _notice = "Application cache cleared."; }
+    }
+}

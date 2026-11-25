@@ -1,0 +1,27 @@
+@if (Error is not null)
+{
+    <div class="lv-banner-error" role="alert">
+        <strong>@Error.Message</strong>
+        @if (!string.IsNullOrWhiteSpace(Error.PossibleCause))
+        {
+            <span>@Error.PossibleCause</span>
+        }
+        @if (Error.FieldErrors is { Count: > 0 })
+        {
+            <ul style="margin:4px 0 0 18px;padding:0">
+                @foreach (var kv in Error.FieldErrors)
+                {
+                    foreach (var msg in kv.Value)
+                    {
+                        <li><strong>@kv.Key:</strong> @msg</li>
+                    }
+                }
+            </ul>
+        }
+        <small style="opacity:0.8">Code: @Error.Code • Ref: @Error.CorrelationId</small>
+    </div>
+}
+
+@code {
+    [Parameter] public ApiErrorResponse? Error { get; set; }
+}

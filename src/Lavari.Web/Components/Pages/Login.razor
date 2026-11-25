@@ -1,0 +1,54 @@
+@page "/login"
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+@inject NavigationManager Nav
+
+<div style="width:100%;max-width:440px">
+    <LvCard Title="Sign in to Lavari" Subtitle="Interior Design Studio Management">
+        <LvErrorBanner Error="_error" />
+        <form @onsubmit="HandleLoginAsync" style="display:flex;flex-direction:column;gap:14px;margin-top:8px">
+            <LvTextField Label="Email" InputType="email" Required="true" Disabled="_loading"
+                         Value="@_email" ValueChanged="v => _email = v ?? string.Empty"
+                         Placeholder="admin@lavari.local" />
+            <LvTextField Label="Password" InputType="password" Required="true" Disabled="_loading"
+                         Value="@_password" ValueChanged="v => _password = v ?? string.Empty" />
+
+            <LvButton Type="submit" Loading="_loading" Disabled="@(string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))">
+                Sign In
+            </LvButton>
+        </form>
+        <p style="margin-top:16px;font-size:0.8rem;color:var(--md-sys-color-on-surface-variant)">
+            Authentication is required for all studio modules. In development, a SuperAdmin account is seeded automatically.
+        </p>
+    </LvCard>
+</div>
+
+@code {
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private bool _loading;
+    private ApiErrorResponse? _error;
+
+    private async Task HandleLoginAsync()
+    {
+        _error = null;
+        _loading = true;
+        try
+        {
+            var result = await Api.LoginAsync(_email, _password);
+            if (!result.IsSuccess || result.Data is null)
+            {
+                _error = result.Error;
+                return;
+            }
+
+            var tz = await Api.GetBrowserTimeZoneAsync();
+            AppState.SetSession(result.Data, tz);
+            Nav.NavigateTo("/");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,0 +1,31 @@
+<section class="lv-card @(Tonal ? "lv-card-tonal" : "") @Class">
+    @if (!string.IsNullOrWhiteSpace(Title) || HeaderActions is not null)
+    {
+        <div class="lv-card-header">
+            <div>
+                @if (!string.IsNullOrWhiteSpace(Title))
+                {
+                    <h2 class="lv-card-title">@Title</h2>
+                }
+                @if (!string.IsNullOrWhiteSpace(Subtitle))
+                {
+                    <p class="lv-card-subtitle">@Subtitle</p>
+                }
+            </div>
+            @if (HeaderActions is not null)
+            {
+                <div class="lv-row">@HeaderActions</div>
+            }
+        </div>
+    }
+    @ChildContent
+</section>
+
+@code {
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public bool Tonal { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

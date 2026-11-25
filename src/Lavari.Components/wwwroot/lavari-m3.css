@@ -1,0 +1,316 @@
+/* Lavari In-House Material 3 Foundations Design System
+   Follows https://m3.material.io/foundations with automatic prefers-color-scheme light/dark tokens. */
+
+:root {
+  color-scheme: light dark;
+  --md-sys-color-primary: #6750A4;
+  --md-sys-color-on-primary: #FFFFFF;
+  --md-sys-color-primary-container: #EADDFF;
+  --md-sys-color-on-primary-container: #21005D;
+  --md-sys-color-secondary: #625B71;
+  --md-sys-color-on-secondary: #FFFFFF;
+  --md-sys-color-secondary-container: #E8DEF8;
+  --md-sys-color-on-secondary-container: #1D192B;
+  --md-sys-color-tertiary: #7D5260;
+  --md-sys-color-surface: #FEF7FF;
+  --md-sys-color-surface-dim: #DED8E1;
+  --md-sys-color-surface-container-lowest: #FFFFFF;
+  --md-sys-color-surface-container-low: #F7F2FA;
+  --md-sys-color-surface-container: #F3EDF7;
+  --md-sys-color-surface-container-high: #ECE6F0;
+  --md-sys-color-on-surface: #1D1B20;
+  --md-sys-color-on-surface-variant: #49454F;
+  --md-sys-color-outline: #79747E;
+  --md-sys-color-outline-variant: #CAC4D0;
+  --md-sys-color-error: #B3261E;
+  --md-sys-color-on-error: #FFFFFF;
+  --md-sys-color-error-container: #F9DEDC;
+  --md-sys-color-on-error-container: #410E0B;
+  --md-sys-color-success-container: #D7F5DF;
+  --md-sys-color-on-success-container: #0D4B24;
+  --md-sys-color-warning-container: #FFF0C2;
+  --md-sys-color-on-warning-container: #5C4300;
+  --md-sys-shape-sm: 8px;
+  --md-sys-shape-md: 12px;
+  --md-sys-shape-lg: 16px;
+  --md-sys-shape-full: 9999px;
+  --md-sys-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.14), 0 2px 4px rgba(0, 0, 0, 0.08);
+  --md-sys-elevation-3: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --md-sys-font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --md-sys-color-primary: #D0BCFF;
+    --md-sys-color-on-primary: #381E72;
+    --md-sys-color-primary-container: #4F378B;
+    --md-sys-color-on-primary-container: #EADDFF;
+    --md-sys-color-secondary: #CCC2DC;
+    --md-sys-color-on-secondary: #332D41;
+    --md-sys-color-secondary-container: #4A4458;
+    --md-sys-color-on-secondary-container: #E8DEF8;
+    --md-sys-color-surface: #141218;
+    --md-sys-color-surface-dim: #141218;
+    --md-sys-color-surface-container-lowest: #0F0D13;
+    --md-sys-color-surface-container-low: #1D1B20;
+    --md-sys-color-surface-container: #211F26;
+    --md-sys-color-surface-container-high: #2B2930;
+    --md-sys-color-on-surface: #E6E0E9;
+    --md-sys-color-on-surface-variant: #CAC4D0;
+    --md-sys-color-outline: #938F99;
+    --md-sys-color-outline-variant: #49454F;
+    --md-sys-color-error: #F2B8B5;
+    --md-sys-color-on-error: #601410;
+    --md-sys-color-error-container: #8C1D18;
+    --md-sys-color-on-error-container: #F9DEDC;
+    --md-sys-color-success-container: #144A29;
+    --md-sys-color-on-success-container: #B9F6CA;
+    --md-sys-color-warning-container: #5A4100;
+    --md-sys-color-on-warning-container: #FFE082;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--md-sys-font-family);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--md-sys-color-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; }
+
+/* Shell layout */
+.lv-shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+@media (max-width: 900px) { .lv-shell { grid-template-columns: 1fr; } }
+
+.lv-rail {
+  background: var(--md-sys-color-surface-container-low);
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lv-brand {
+  padding: 10px 14px 18px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  margin-bottom: 8px;
+}
+.lv-brand-title { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.14em; color: var(--md-sys-color-primary); }
+.lv-brand-sub { font-size: 0.72rem; letter-spacing: 0.12em; color: var(--md-sys-color-on-surface-variant); text-transform: uppercase; }
+
+.lv-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--md-sys-shape-full);
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 500;
+  font-size: 0.92rem;
+  transition: background 0.15s ease;
+}
+.lv-nav-link:hover { background: var(--md-sys-color-surface-container-high); text-decoration: none; color: var(--md-sys-color-on-surface); }
+.lv-nav-link.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); font-weight: 600; }
+
+.lv-main { display: flex; flex-direction: column; min-width: 0; }
+.lv-topbar {
+  background: var(--md-sys-color-surface-container-low);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.lv-content { padding: 24px; max-width: 1440px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+/* Material 3 Cards */
+.lv-card {
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-lg);
+  padding: 20px;
+  box-shadow: var(--md-sys-elevation-1);
+}
+.lv-card-tonal { background: var(--md-sys-color-surface-container); border-color: transparent; box-shadow: none; }
+.lv-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.lv-card-title { margin: 0; font-size: 1.12rem; font-weight: 600; color: var(--md-sys-color-on-surface); }
+.lv-card-subtitle { margin: 2px 0 0; font-size: 0.86rem; color: var(--md-sys-color-on-surface-variant); }
+
+/* Buttons */
+.lv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--md-sys-shape-full);
+  padding: 9px 18px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+.lv-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.lv-btn-filled { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+.lv-btn-filled:hover:not(:disabled) { filter: brightness(1.08); }
+.lv-btn-tonal { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.lv-btn-tonal:hover:not(:disabled) { filter: brightness(0.96); }
+.lv-btn-outlined { background: transparent; border-color: var(--md-sys-color-outline); color: var(--md-sys-color-primary); }
+.lv-btn-outlined:hover:not(:disabled) { background: var(--md-sys-color-surface-container); }
+.lv-btn-danger { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+.lv-btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+
+/* Fields & Forms */
+.lv-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.lv-label { font-size: 0.82rem; font-weight: 600; color: var(--md-sys-color-on-surface-variant); }
+.lv-required { color: var(--md-sys-color-error); margin-left: 2px; }
+.lv-input, .lv-select, .lv-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--md-sys-shape-sm);
+  border: 1px solid var(--md-sys-color-outline);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font-family: inherit;
+  font-size: 0.92rem;
+}
+.lv-input:disabled, .lv-select:disabled, .lv-textarea:disabled {
+  background: var(--md-sys-color-surface-container);
+  opacity: 0.7;
+}
+.lv-field-error { font-size: 0.78rem; color: var(--md-sys-color-error); }
+
+/* Badges */
+.lv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--md-sys-shape-full);
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+.lv-badge-primary { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.lv-badge-success { background: var(--md-sys-color-success-container); color: var(--md-sys-color-on-success-container); }
+.lv-badge-warning { background: var(--md-sys-color-warning-container); color: var(--md-sys-color-on-warning-container); }
+.lv-badge-error { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+
+/* Error & Info Banners */
+.lv-banner-error {
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+  border-radius: var(--md-sys-shape-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lv-banner-warning {
+  background: var(--md-sys-color-warning-container);
+  color: var(--md-sys-color-on-warning-container);
+  border-radius: var(--md-sys-shape-md);
+  padding: 12px 16px;
+}
+.lv-banner-success {
+  background: var(--md-sys-color-success-container);
+  color: var(--md-sys-color-on-success-container);
+  border-radius: var(--md-sys-shape-md);
+  padding: 12px 16px;
+}
+
+/* Tables & Grids */
+.lv-table-wrap { overflow-x: auto; }
+.lv-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lv-table th, .lv-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
+.lv-table th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--md-sys-color-on-surface-variant); background: var(--md-sys-color-surface-container-low); }
+
+.lv-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.lv-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.lv-grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.lv-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lv-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--md-sys-color-outline-variant); padding-bottom: 8px; flex-wrap: wrap; }
+
+/* Dialogs */
+.lv-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 1000;
+}
+.lv-dialog {
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  border-radius: var(--md-sys-shape-lg);
+  box-shadow: var(--md-sys-elevation-3);
+  max-width: 620px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lv-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+
+/* Mood Board Canvas */
+.lv-canvas-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--md-sys-shape-md);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  overflow: hidden;
+  box-shadow: var(--md-sys-elevation-1);
+}
+.lv-canvas-brand-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 36px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  z-index: 50;
+}
+.lv-canvas-item {
+  position: absolute;
+  border: 1px dashed rgba(103, 80, 164, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.4);
+}
+.lv-canvas-item.selected { border: 2px solid var(--md-sys-color-primary); box-shadow: 0 0 0 2px rgba(103, 80, 164, 0.25); }
+
+.lv-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: lv-spin 0.7s linear infinite;
+}
+@keyframes lv-spin { to { transform: rotate(360deg); } }

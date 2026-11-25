@@ -1,0 +1,96 @@
+@page "/forecasting"
+@inject LavariBrowserApiClient Api
+@inject IFormattingService Formatting
+
+<h1 style="margin:0;font-size:1.5rem">Financial Forecasting</h1>
+<LvErrorBanner Error="_error" />
+
+<LvCard Title="Forecast Period &amp; Scope">
+    <div class="lv-grid-4">
+        <div class="lv-field">
+            <label class="lv-label">Start Date</label>
+            <input class="lv-input" type="date" @bind="_startDate" />
+        </div>
+        <div class="lv-field">
+            <label class="lv-label">End Date</label>
+            <input class="lv-input" type="date" @bind="_endDate" />
+        </div>
+        <LvTextField Label="Reporting Time Zone" Value="@_tz" ValueChanged="v => _tz = v ?? string.Empty" />
+        <LvTextField Label="Currency" Value="@_currency" ValueChanged="v => _currency = v ?? string.Empty" />
+    </div>
+    <div style="margin-top:14px">
+        <LvButton OnClick="RunForecastAsync" Loading="_loading">Calculate Forecast</LvButton>
+    </div>
+</LvCard>
+
+@if (_report is not null)
+{
+    <div class="lv-grid-3">
+        <LvCard Tonal="true" Title="@Formatting.FormatMoney(new MoneyCents(_report.PlannedRevenueCents, _report.Currency))" Subtitle="Planned Revenue" />
+        <LvCard Tonal="true" Title="@Formatting.FormatMoney(new MoneyCents(_report.PlannedCostCents, _report.Currency))" Subtitle="Planned Cost" />
+        <LvCard Tonal="true" Title="@Formatting.FormatMoney(new MoneyCents(_report.PlannedProfitCents, _report.Currency))" Subtitle="Planned Profit" />
+    </div>
+    <div class="lv-grid-3">
+        <LvCard Title="@Formatting.FormatMoney(new MoneyCents(_report.ActualRevenueCents, _report.Currency))" Subtitle="Actual Revenue (Issued Invoices)" />
+        <LvCard Title="@Formatting.FormatMoney(new MoneyCents(_report.ActualCostCents, _report.Currency))" Subtitle="Actual Cost (Paid Procurement)" />
+        <LvCard Title="@Formatting.FormatMoney(new MoneyCents(_report.ActualProfitCents, _report.Currency))" Subtitle="Actual Profit" />
+    </div>
+
+    <LvCard Title="Source Breakdown" Subtitle="@_report.Assumptions">
+        @if (_report.IncompleteRecordCount > 0)
+        {
+            <div class="lv-banner-warning" style="margin-bottom:12px">
+                @_report.IncompleteRecordCount record(s) had missing dates and were excluded rather than treated as zero.
+            </div>
+        }
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Date</th><th>Job</th><th>Source</th><th>Type</th><th>Direction</th><th>Amount</th></tr></thead>
+                <tbody>
+                    @foreach (var s in _report.Sources)
+                    {
+                        <tr>
+                            <td>@Formatting.FormatCalendarDate(s.EffectiveDate)</td>
+                            <td><a href="/jobs/@s.JobId">@s.JobName</a></td>
+                            <td>@s.Label</td>
+                            <td><LvBadge Tone="@(s.IsActual ? "success" : "warning")">@(s.IsActual ? "Actual" : "Planned") • @s.SourceType</LvBadge></td>
+                            <td>@s.Direction</td>
+                            <td><strong>@Formatting.FormatMoney(new MoneyCents(s.AmountCents, s.Currency))</strong></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+}
+
+@code {
+    private DateOnly _startDate = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+    private DateOnly _endDate = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.DaysInMonth(DateTime.UtcNow.Year, DateTime.UtcNow.Month));
+    private string _tz = "Australia/Sydney";
+    private string _currency = "AUD";
+    private bool _loading;
+    private ForecastReportDto? _report;
+    private ApiErrorResponse? _error;
+
+    protected override Task OnInitializedAsync() => RunForecastAsync();
+
+    private async Task RunForecastAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<ForecastReportDto>("/api/forecast", new ForecastRequest
+            {
+                StartDate = _startDate,
+                EndDate = _endDate,
+                ReportingTimeZone = _tz,
+                Currency = _currency
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _report = resp.Data;
+        }
+        finally { _loading = false; }
+    }
+}

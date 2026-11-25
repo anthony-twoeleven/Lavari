@@ -1,0 +1,313 @@
+@page "/clients"
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+
+<div class="lv-row" style="justify-content:space-between">
+    <h1 style="margin:0;font-size:1.5rem">Clients, Job Groups &amp; Jobs</h1>
+    <div class="lv-row">
+        <input class="lv-input" style="width:220px" placeholder="Search clients..." @bind="_search" />
+        <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>
+        @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Alter))
+        {
+            <LvButton OnClick="OpenNewClient">New Client</LvButton>
+        }
+    </div>
+</div>
+
+<LvErrorBanner Error="_error" />
+
+<div class="lv-grid-2">
+    <LvCard Title="Clients" Subtitle="Select a client to view its Job Groups and Jobs">
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Client</th><th>Contact</th><th>Groups</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var c in _clients)
+                    {
+                        <tr style="@(c.Id == _selectedClient?.Id ? "background:var(--md-sys-color-secondary-container)" : "")">
+                            <td><strong>@c.Name</strong></td>
+                            <td>@c.ContactName <small>@c.Email</small></td>
+                            <td>@c.ActiveGroupCount</td>
+                            <td class="lv-row">
+                                <LvButton Variant="tonal" Small="true" OnClick="() => SelectClientAsync(c)">Open</LvButton>
+                                @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Delete))
+                                {
+                                    <LvButton Variant="outlined" Small="true" OnClick="() => DeleteClientAsync(c)">Delete</LvButton>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+
+    <LvCard Title="@(_selectedClient is null ? "Job Groups & Jobs" : $"{_selectedClient.Name} — Groups & Jobs")">
+        <HeaderActions>
+            @if (_selectedClient is not null && AppState.Can(ModuleKeys.JobGroups, AccessLevel.Alter))
+            {
+                <LvButton Variant="tonal" Small="true" OnClick="() => _showGroupModal = true">+ Job Group</LvButton>
+            }
+            @if (_groups.Count > 0 && AppState.Can(ModuleKeys.Jobs, AccessLevel.Alter))
+            {
+                <LvButton Small="true" OnClick="OpenNewJob">+ New Job</LvButton>
+            }
+        </HeaderActions>
+        <ChildContent>
+            @if (_selectedClient is null)
+            {
+                <p>Select a client on the left to manage its job groups and jobs.</p>
+            }
+            else
+            {
+                <div style="display:flex;flex-direction:column;gap:14px">
+                    @foreach (var g in _groups)
+                    {
+                        var groupJobs = _jobs.Where(j => j.JobGroupId == g.Id).ToList();
+                        <div class="lv-card lv-card-tonal" style="padding:14px">
+                            <div class="lv-row" style="justify-content:space-between;margin-bottom:8px">
+                                <strong>📁 @g.Name</strong>
+                                <LvBadge>@groupJobs.Count job(s)</LvBadge>
+                            </div>
+                            @if (groupJobs.Count == 0)
+                            {
+                                <small style="color:var(--md-sys-color-on-surface-variant)">No jobs in this group yet.</small>
+                            }
+                            else
+                            {
+                                <div style="display:flex;flex-direction:column;gap:6px">
+                                    @foreach (var j in groupJobs)
+                                    {
+                                        <div class="lv-row" style="justify-content:space-between;background:var(--md-sys-color-surface-container-lowest);padding:8px 12px;border-radius:8px">
+                                            <div>
+                                                <a href="/jobs/@j.Id"><strong>@j.Name</strong></a>
+                                                <div><small>@j.Status • @j.TimeZoneIana • @j.DefaultCurrency</small></div>
+                                            </div>
+                                            <a class="lv-btn lv-btn-filled lv-btn-sm" href="/jobs/@j.Id">Workspace</a>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </ChildContent>
+    </LvCard>
+</div>
+
+<LvDialog Open="_showClientModal" Title="Create Client" OnClose="() => _showClientModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <LvTextField Label="Client Name" Required="true" Value="@_clientDraft.Name" ValueChanged="v => _clientDraft.Name = v ?? string.Empty" />
+            <LvTextField Label="Contact Name" Value="@_clientDraft.ContactName" ValueChanged="v => _clientDraft.ContactName = v" />
+            <LvTextField Label="Email" InputType="email" Value="@_clientDraft.Email" ValueChanged="v => _clientDraft.Email = v" />
+            <LvTextField Label="Phone" Value="@_clientDraft.Phone" ValueChanged="v => _clientDraft.Phone = v" />
+            <LvTextField Label="Billing Address" Multiline="true" Value="@_clientDraft.BillingAddress" ValueChanged="v => _clientDraft.BillingAddress = v" />
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showClientModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@(!_clientDirty.IsDirty(_clientDraft) || string.IsNullOrWhiteSpace(_clientDraft.Name))" OnClick="SaveClientAsync">Create Client</LvButton>
+    </Actions>
+</LvDialog>
+
+<LvDialog Open="_showGroupModal" Title="Create Job Group (Folder)" OnClose="() => _showGroupModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <LvTextField Label="Group Name" Required="true" Value="@_groupName" ValueChanged="v => _groupName = v ?? string.Empty" Placeholder="e.g. Display Homes, Renovations" />
+            <LvTextField Label="Description" Value="@_groupDesc" ValueChanged="v => _groupDesc = v" />
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showGroupModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_groupName)" OnClick="SaveGroupAsync">Create Group</LvButton>
+    </Actions>
+</LvDialog>
+
+<LvDialog Open="_showJobModal" Title="Create Job" OnClose="() => _showJobModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="lv-field">
+                <label class="lv-label">Job Group <span class="lv-required">*</span></label>
+                <select class="lv-select" @bind="_jobGroupId">
+                    @foreach (var g in _groups)
+                    {
+                        <option value="@g.Id">@g.Name</option>
+                    }
+                </select>
+            </div>
+            <LvTextField Label="Job Name" Required="true" Value="@_jobName" ValueChanged="v => _jobName = v ?? string.Empty" />
+            <div class="lv-grid-2">
+                <LvTextField Label="IANA Time Zone" Required="true" Value="@_jobTz" ValueChanged="v => _jobTz = v ?? string.Empty" />
+                <LvTextField Label="Currency (ISO)" Required="true" Value="@_jobCurrency" ValueChanged="v => _jobCurrency = v ?? string.Empty" />
+            </div>
+            <LvTextField Label="PO Number" Value="@_jobPo" ValueChanged="v => _jobPo = v" />
+            <LvTextField Label="Description" Multiline="true" Value="@_jobDesc" ValueChanged="v => _jobDesc = v" />
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showJobModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@(string.IsNullOrWhiteSpace(_jobName) || _jobGroupId == Guid.Empty)" OnClick="SaveJobAsync">Create Job</LvButton>
+    </Actions>
+</LvDialog>
+
+@code {
+    private sealed class ClientDraft
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? ContactName { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? BillingAddress { get; set; }
+    }
+
+    private List<ClientDto> _clients = [];
+    private ClientDto? _selectedClient;
+    private List<JobGroupDto> _groups = [];
+    private List<JobDto> _jobs = [];
+    private string _search = string.Empty;
+    private bool _loading;
+    private bool _saving;
+    private ApiErrorResponse? _error;
+
+    private bool _showClientModal;
+    private ClientDraft _clientDraft = new();
+    private readonly LvDirtyTracker<ClientDraft> _clientDirty = new();
+
+    private bool _showGroupModal;
+    private string _groupName = string.Empty;
+    private string? _groupDesc;
+
+    private bool _showJobModal;
+    private Guid _jobGroupId;
+    private string _jobName = string.Empty;
+    private string _jobTz = "Australia/Sydney";
+    private string _jobCurrency = "AUD";
+    private string? _jobPo;
+    private string? _jobDesc;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<ClientDto>>($"/api/clients?page=1&pageSize=100&search={Uri.EscapeDataString(_search)}");
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _clients = resp.Data?.Items.ToList() ?? [];
+            if (_selectedClient is not null)
+            {
+                var updated = _clients.FirstOrDefault(c => c.Id == _selectedClient.Id);
+                if (updated is not null) await SelectClientAsync(updated);
+            }
+            else if (_clients.Count > 0)
+            {
+                await SelectClientAsync(_clients[0]);
+            }
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task SelectClientAsync(ClientDto client)
+    {
+        _selectedClient = client;
+        var gResp = await Api.GetAsync<List<JobGroupDto>>($"/api/job-groups?clientId={client.Id}");
+        _groups = gResp.Data ?? [];
+        var jResp = await Api.GetAsync<PagedResult<JobDto>>($"/api/jobs?clientId={client.Id}&page=1&pageSize=100");
+        _jobs = jResp.Data?.Items.ToList() ?? [];
+    }
+
+    private void OpenNewClient()
+    {
+        _clientDraft = new ClientDraft();
+        _clientDirty.SetBaseline(_clientDraft);
+        _showClientModal = true;
+    }
+
+    private async Task SaveClientAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<ClientDto>("/api/clients", new UpsertClientRequest
+            {
+                Name = _clientDraft.Name,
+                ContactName = _clientDraft.ContactName,
+                Email = _clientDraft.Email,
+                Phone = _clientDraft.Phone,
+                BillingAddress = _clientDraft.BillingAddress
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showClientModal = false;
+            await LoadAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteClientAsync(ClientDto c)
+    {
+        _error = null;
+        var resp = await Api.DeleteAsync($"/api/clients/{c.Id}?token={Uri.EscapeDataString(c.ConcurrencyToken)}");
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _selectedClient = null;
+        await LoadAsync();
+    }
+
+    private async Task SaveGroupAsync()
+    {
+        if (_selectedClient is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<JobGroupDto>("/api/job-groups", new UpsertJobGroupRequest
+            {
+                ClientId = _selectedClient.Id,
+                Name = _groupName,
+                Description = _groupDesc
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _groupName = string.Empty;
+            _groupDesc = null;
+            _showGroupModal = false;
+            await SelectClientAsync(_selectedClient);
+        }
+        finally { _saving = false; }
+    }
+
+    private void OpenNewJob()
+    {
+        _jobGroupId = _groups.FirstOrDefault()?.Id ?? Guid.Empty;
+        _jobName = string.Empty;
+        _jobPo = null;
+        _jobDesc = null;
+        _showJobModal = true;
+    }
+
+    private async Task SaveJobAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<JobDto>("/api/jobs", new UpsertJobRequest
+            {
+                JobGroupId = _jobGroupId,
+                Name = _jobName,
+                Status = "Active",
+                TimeZoneIana = _jobTz,
+                DefaultCurrency = _jobCurrency,
+                PoNumber = _jobPo,
+                Description = _jobDesc
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showJobModal = false;
+            if (_selectedClient is not null) await SelectClientAsync(_selectedClient);
+        }
+        finally { _saving = false; }
+    }
+}

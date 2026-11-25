@@ -6,6 +6,8 @@ using Lavari.Application.Abstractions;
 using Lavari.Infrastructure;
 using Lavari.Infrastructure.Persistence;
 using Lavari.ServiceDefaults;
+using Lavari.Web.Components;
+using Lavari.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +15,11 @@ using TickerQ.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+builder.Services.AddScoped<LavariBrowserApiClient>();
+builder.Services.AddScoped<AppSessionState>();
 
 var keysDir = ResolveDataProtectionKeysPath(builder.Configuration["Lavari:DataProtectionKeysPath"]);
 builder.Services.AddDataProtection()
@@ -91,8 +98,10 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.MapDefaultEndpoints();
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 app.UseMiddleware<LavariActorHydrationMiddleware>();
 app.UseMiddleware<LavariExceptionMiddleware>();
 app.UseMiddleware<LavariAntiforgeryMiddleware>();
@@ -103,6 +112,8 @@ if (enableTickerQ)
 }
 
 app.MapLavariApi();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
 
 app.Run();
 

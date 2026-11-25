@@ -1,0 +1,253 @@
+@page "/products"
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+@inject IFormattingService Formatting
+
+<div class="lv-row" style="justify-content:space-between">
+    <h1 style="margin:0;font-size:1.5rem">Global Product Catalog &amp; Supplier Capture</h1>
+    <div class="lv-row">
+        <input class="lv-input" style="width:220px" placeholder="Search products..." @bind="_search" />
+        <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>
+        @if (AppState.Can(ModuleKeys.SupplierCapture, AccessLevel.Alter))
+        {
+            <LvButton Variant="outlined" OnClick="() => _showCaptureModal = true">Capture Supplier Page</LvButton>
+        }
+        @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Alter))
+        {
+            <LvButton OnClick="OpenNewProduct">+ Add Product</LvButton>
+        }
+    </div>
+</div>
+
+<LvErrorBanner Error="_error" />
+@if (!string.IsNullOrWhiteSpace(_notice))
+{
+    <div class="lv-banner-warning">@_notice</div>
+}
+
+<LvCard Title="Catalog Products" Subtitle="Global reusable furniture &amp; decor catalog with flexible per-product attributes">
+    <div class="lv-table-wrap">
+        <table class="lv-table">
+            <thead><tr><th>Product</th><th>Supplier</th><th>Our Cost</th><th>RRP</th><th>Attributes</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var p in _products)
+                {
+                    <tr>
+                        <td>
+                            <strong>@p.Name</strong>
+                            @if (!string.IsNullOrWhiteSpace(p.SupplierUrl))
+                            {
+                                <div><a href="@p.SupplierUrl" target="_blank" rel="noopener">Supplier link</a></div>
+                            }
+                        </td>
+                        <td>@p.SupplierName</td>
+                        <td>@Formatting.FormatMoney(new MoneyCents(p.CostCents, p.Currency))</td>
+                        <td>@Formatting.FormatMoney(new MoneyCents(p.RrpCents, p.Currency))</td>
+                        <td>
+                            @foreach (var a in p.Attributes)
+                            {
+                                <LvBadge>@a.Label: @a.Value @a.Unit</LvBadge>
+                            }
+                        </td>
+                        <td>
+                            @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Delete))
+                            {
+                                <LvButton Variant="outlined" Small="true" OnClick="() => DeleteProductAsync(p)">Delete</LvButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</LvCard>
+
+@if (_drafts.Count > 0)
+{
+    <LvCard Title="Supplier Capture &amp; LLM Extraction Drafts" Subtitle="Untrusted drafts awaiting designer review before saving to catalog">
+        <div class="lv-table-wrap">
+            <table class="lv-table">
+                <thead><tr><th>Source URL</th><th>Provider</th><th>Status</th><th>Extracted Draft</th></tr></thead>
+                <tbody>
+                    @foreach (var d in _drafts)
+                    {
+                        <tr>
+                            <td><small>@d.SourceUrl</small></td>
+                            <td><LvBadge>@d.ProviderName</LvBadge></td>
+                            <td><LvBadge Tone="warning">@d.Status</LvBadge></td>
+                            <td><code style="font-size:0.78rem">@d.ExtractedJson</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </LvCard>
+}
+
+<LvDialog Open="_showProductModal" Title="Add Catalog Product" OnClose="() => _showProductModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <LvTextField Label="Product Name" Required="true" Value="@_name" ValueChanged="v => _name = v ?? string.Empty" />
+            <div class="lv-grid-2">
+                <LvTextField Label="Supplier Name" Value="@_supplierName" ValueChanged="v => _supplierName = v" />
+                <LvTextField Label="Supplier URL" Value="@_supplierUrl" ValueChanged="v => _supplierUrl = v" />
+            </div>
+            <div class="lv-grid-3">
+                <LvTextField Label="Currency" Required="true" Value="@_currency" ValueChanged="v => _currency = v ?? string.Empty" />
+                <LvTextField Label="Our Cost (e.g. 450.00)" Value="@_costInput" ValueChanged="v => _costInput = v ?? string.Empty" />
+                <LvTextField Label="RRP (e.g. 899.00)" Value="@_rrpInput" ValueChanged="v => _rrpInput = v ?? string.Empty" />
+            </div>
+            <LvTextField Label="Description" Multiline="true" Value="@_description" ValueChanged="v => _description = v" />
+            <LvTextField Label="Custom Attributes (one per line: Key=Value, e.g. Colour=Porcelain)" Multiline="true" Value="@_attributesText" ValueChanged="v => _attributesText = v ?? string.Empty" />
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showProductModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_name)" OnClick="SaveProductAsync">Save Product</LvButton>
+    </Actions>
+</LvDialog>
+
+<LvDialog Open="_showCaptureModal" Title="Capture Supplier Page Content" OnClose="() => _showCaptureModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <LvTextField Label="Supplier Page URL" Required="true" Value="@_capUrl" ValueChanged="v => _capUrl = v ?? string.Empty" Placeholder="https://supplier.example/product" />
+            <LvTextField Label="Copied Page Text / Specification Blob" Required="true" Multiline="true" Rows="5" Value="@_capText" ValueChanged="v => _capText = v ?? string.Empty" />
+            <label class="lv-row" style="font-size:0.86rem">
+                <input type="checkbox" @bind="_capConsent" />
+                I confirm this content is user-selected and contains no supplier login credentials or cookies.
+            </label>
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showCaptureModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@(!_capConsent || string.IsNullOrWhiteSpace(_capUrl) || string.IsNullOrWhiteSpace(_capText))" OnClick="CapturePageAsync">Extract Draft</LvButton>
+    </Actions>
+</LvDialog>
+
+@code {
+    private List<ProductDto> _products = [];
+    private List<LlmExtractionDraftDto> _drafts = [];
+    private string _search = string.Empty;
+    private bool _loading;
+    private bool _saving;
+    private ApiErrorResponse? _error;
+    private string? _notice;
+
+    private bool _showProductModal;
+    private string _name = string.Empty;
+    private string? _supplierName;
+    private string? _supplierUrl;
+    private string _currency = "AUD";
+    private string _costInput = "0.00";
+    private string _rrpInput = "0.00";
+    private string? _description;
+    private string _attributesText = "Colour=Porcelain\nDimensions=W1500 x D400 x H750mm";
+
+    private bool _showCaptureModal;
+    private string _capUrl = string.Empty;
+    private string _capText = string.Empty;
+    private bool _capConsent;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.GetAsync<PagedResult<ProductDto>>($"/api/products?page=1&pageSize=100&search={Uri.EscapeDataString(_search)}");
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _products = resp.Data?.Items.ToList() ?? [];
+
+            if (AppState.Can(ModuleKeys.SupplierCapture, AccessLevel.Read))
+            {
+                var d = await Api.GetAsync<List<LlmExtractionDraftDto>>("/api/integrations/drafts");
+                if (d.IsSuccess && d.Data is not null) _drafts = d.Data;
+            }
+        }
+        finally { _loading = false; }
+    }
+
+    private void OpenNewProduct()
+    {
+        _name = string.Empty;
+        _supplierName = null;
+        _supplierUrl = null;
+        _costInput = "0.00";
+        _rrpInput = "0.00";
+        _description = null;
+        _showProductModal = true;
+    }
+
+    private async Task SaveProductAsync()
+    {
+        _saving = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var cost = Formatting.ParseMoneyInput(_costInput, _currency);
+            var rrp = Formatting.ParseMoneyInput(_rrpInput, _currency);
+            var attrs = _attributesText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => line.Split('=', 2))
+                .Where(p => p.Length == 2 && !string.IsNullOrWhiteSpace(p[0]))
+                .Select(p => new ProductAttributeDto { Key = p[0].Trim().ToLowerInvariant(), Label = p[0].Trim(), Value = p[1].Trim() })
+                .ToArray();
+
+            var resp = await Api.PostAsync<ProductDto>("/api/products", new UpsertProductRequest
+            {
+                Name = _name,
+                SupplierName = _supplierName,
+                SupplierUrl = _supplierUrl,
+                Description = _description,
+                Currency = _currency,
+                CostCents = cost.Cents,
+                RrpCents = rrp.Cents,
+                Attributes = attrs,
+                VariantIdentifierKeys = attrs.Select(a => a.Key).ToArray()
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            if (!string.IsNullOrWhiteSpace(resp.Data?.PossibleDuplicateWarning))
+            {
+                _notice = resp.Data.PossibleDuplicateWarning;
+            }
+            _showProductModal = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = new ApiErrorResponse { Code = "LAV-VAL-001", Message = ex.Message, PossibleCause = "Check monetary amounts and attributes.", CorrelationId = "ui" };
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteProductAsync(ProductDto p)
+    {
+        var resp = await Api.DeleteAsync($"/api/products/{p.Id}?token={Uri.EscapeDataString(p.ConcurrencyToken)}");
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        await LoadAsync();
+    }
+
+    private async Task CapturePageAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<LlmExtractionDraftDto>("/api/integrations/supplier-capture", new SupplierCaptureRequest
+            {
+                SourceUrl = _capUrl,
+                PageTextContent = _capText,
+                UserConfirmedConsent = _capConsent
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showCaptureModal = false;
+            _capUrl = string.Empty;
+            _capText = string.Empty;
+            _capConsent = false;
+            await LoadAsync();
+        }
+        finally { _saving = false; }
+    }
+}

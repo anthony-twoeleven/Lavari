@@ -1,0 +1,1349 @@
+@page "/jobs/{JobId:guid}"
+@implements IAsyncDisposable
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+@inject IFormattingService Formatting
+
+@if (_job is null && _loading)
+{
+    <p><span class="lv-spinner"></span> Loading job workspace...</p>
+}
+else if (_job is null)
+{
+    <LvErrorBanner Error="_error" />
+}
+else
+{
+    <div class="lv-row" style="justify-content:space-between">
+        <div>
+            <small><a href="/clients">Clients &amp; Jobs</a> / @_job.ClientName / @_job.JobGroupName</small>
+            <h1 style="margin:2px 0 0;font-size:1.5rem">@_job.Name</h1>
+            <div class="lv-row" style="margin-top:6px">
+                <LvBadge Tone="primary">@_job.Status</LvBadge>
+                <LvBadge>Zone: @_job.TimeZoneIana</LvBadge>
+                <LvBadge>Currency: @_job.DefaultCurrency</LvBadge>
+                @{
+                    var updatedFmt = Formatting.FormatDateTime(_job.UpdatedAtUtc, _job.TimeZoneIana, AppState.BrowserTimeZone);
+                }
+                <small style="color:var(--md-sys-color-on-surface-variant)">
+                    Updated: @updatedFmt.JobLocalFormatted
+                    @if (updatedFmt.ZonesDiffer && updatedFmt.BrowserLocalFormatted is not null)
+                    {
+                        <span> (Local: @updatedFmt.BrowserLocalFormatted)</span>
+                    }
+                </small>
+            </div>
+        </div>
+
+        <div class="lv-row">
+            @if (_lockStatus is not null)
+            {
+                @if (_lockStatus.IsHeldByCurrentSession)
+                {
+                    <LvBadge Tone="success">🔒 Editing Lock Active</LvBadge>
+                    <LvButton Variant="outlined" Small="true" OnClick="ReleaseLockAsync">Finish / Release Lock</LvButton>
+                }
+                else if (_lockStatus.IsReservedForCurrentSession)
+                {
+                    <LvBadge Tone="warning">Your Turn Ready!</LvBadge>
+                    <LvButton Small="true" OnClick="ClaimTurnAsync">Claim Turn &amp; Reload</LvButton>
+                }
+                else if (_lockStatus.IsCurrentSessionQueued)
+                {
+                    <LvBadge Tone="warning">Queued (Position @_lockStatus.QueuePosition)</LvBadge>
+                    <LvButton Variant="outlined" Small="true" OnClick="CancelQueueAsync">Leave Queue</LvButton>
+                }
+                else if (_lockStatus.IsLocked)
+                {
+                    <LvBadge Tone="warning">Locked by @(_lockStatus.HolderDisplayName ?? "another user")</LvBadge>
+                    <LvButton Variant="tonal" Small="true" OnClick="RequestModifyAsync">Join Modify Queue</LvButton>
+                }
+                else if (AppState.Can(ModuleKeys.Jobs, AccessLevel.Alter))
+                {
+                    <LvButton OnClick="RequestModifyAsync">Modify Job</LvButton>
+                }
+            }
+        </div>
+    </div>
+
+    <LvErrorBanner Error="_error" />
+    @if (!string.IsNullOrWhiteSpace(_notice))
+    {
+        <div class="lv-banner-success">@_notice</div>
+    }
+
+    <div class="lv-tabs">
+        <LvButton Variant='@(_tab == "overview" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("overview")'>Overview</LvButton>
+        <LvButton Variant='@(_tab == "time" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("time")'>Time Tracker (@_timeEntries.Count)</LvButton>
+        <LvButton Variant='@(_tab == "dates" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("dates")'>Dates &amp; Milestones (@_dates.Count)</LvButton>
+        <LvButton Variant='@(_tab == "items" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("items")'>Line Items (@_lineItems.Count)</LvButton>
+        <LvButton Variant='@(_tab == "moodboards" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("moodboards")'>Mood Boards (@_moodBoards.Count)</LvButton>
+        <LvButton Variant='@(_tab == "finance" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("finance")'>Quotes &amp; Invoices (@_documents.Count)</LvButton>
+        <LvButton Variant='@(_tab == "procurement" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("procurement")'>Procurement &amp; Receipts</LvButton>
+    </div>
+
+    @if (_tab == "overview")
+    {
+        <LvCard Title="Job Details" Subtitle="@(CanEditJob ? "You hold the exclusive Modify lock." : "Read-only — click Modify Job above to edit.")">
+            <div class="lv-grid-2">
+                <LvTextField Label="Job Name" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.Name" ValueChanged="v => _jobDraft.Name = v ?? string.Empty" />
+                <LvTextField Label="Status" Disabled="@(!CanEditJob)" Value="@_jobDraft.Status" ValueChanged="v => _jobDraft.Status = v ?? string.Empty" />
+                <LvTextField Label="IANA Time Zone" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.TimeZoneIana" ValueChanged="v => _jobDraft.TimeZoneIana = v ?? string.Empty" />
+                <LvTextField Label="Default Currency" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.DefaultCurrency" ValueChanged="v => _jobDraft.DefaultCurrency = v ?? string.Empty" />
+                <LvTextField Label="PO Number" Disabled="@(!CanEditJob)" Value="@_jobDraft.PoNumber" ValueChanged="v => _jobDraft.PoNumber = v" />
+                <LvTextField Label="Hourly Rate (e.g. 165.00)" Disabled="@(!CanEditJob)" Value="@_jobDraft.HourlyRateInput" ValueChanged="v => _jobDraft.HourlyRateInput = v ?? string.Empty" />
+            </div>
+            <div style="margin-top:12px">
+                <LvTextField Label="Notes" Multiline="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.Notes" ValueChanged="v => _jobDraft.Notes = v" />
+            </div>
+            <div class="lv-row" style="margin-top:14px">
+                <LvButton Loading="_saving" Disabled="@(!CanEditJob || !_jobDirty.IsDirty(_jobDraft) || string.IsNullOrWhiteSpace(_jobDraft.Name))" OnClick="SaveJobOverviewAsync">Save Changes</LvButton>
+            </div>
+        </LvCard>
+    }
+    else if (_tab == "time")
+    {
+        <LvCard Title="Job Time Tracker" Subtitle="Start/pause/resume/stop, cancel, Stop At / Resume At corrections, flat &amp; range entries">
+            <HeaderActions>
+                <LvButton OnClick="() => StartTimerAsync(false)" Loading="_saving">▶ Start Timer</LvButton>
+                <LvButton Variant="tonal" OnClick="() => _showFlatModal = true">+ Flat Entry</LvButton>
+                <LvButton Variant="outlined" OnClick="() => _showRangeModal = true">+ Time Range</LvButton>
+            </HeaderActions>
+            <ChildContent>
+                <div class="lv-table-wrap">
+                    <table class="lv-table">
+                        <thead><tr><th>Date</th><th>Worker</th><th>Source / State</th><th>Duration</th><th>Description</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            @foreach (var t in _timeEntries)
+                            {
+                                <tr>
+                                    <td>@Formatting.FormatCalendarDate(t.WorkDate)</td>
+                                    <td>@t.WorkerDisplayName</td>
+                                    <td>
+                                        <LvBadge Tone="@(t.State == "Running" ? "success" : t.State == "Paused" ? "warning" : t.State == "Cancelled" ? "error" : "primary")">
+                                            @t.SourceType • @t.State
+                                        </LvBadge>
+                                        @if (t.HasIntentionalOverlap) { <LvBadge Tone="warning">Overlap</LvBadge> }
+                                        @if (t.IsInvoiced) { <LvBadge Tone="primary">Invoiced</LvBadge> }
+                                    </td>
+                                    <td><strong>@Formatting.FormatDuration(t.LiveDurationSeconds)</strong></td>
+                                    <td>@t.Description</td>
+                                    <td class="lv-row">
+                                        @if (t.State == "Running")
+                                        {
+                                            <LvButton Variant="tonal" Small="true" OnClick="() => PauseTimerAsync(t)">Pause</LvButton>
+                                            <LvButton Small="true" OnClick="() => StopTimerAsync(t)">Stop</LvButton>
+                                            <LvButton Variant="outlined" Small="true" OnClick='() => OpenAtTimeModal(t, "StopAt")'>Stop At…</LvButton>
+                                            <LvButton Variant="danger" Small="true" OnClick="() => CancelTimerAsync(t)">Cancel</LvButton>
+                                        }
+                                        else if (t.State == "Paused")
+                                        {
+                                            <LvButton Small="true" OnClick="() => ResumeTimerAsync(t)">Resume</LvButton>
+                                            <LvButton Variant="outlined" Small="true" OnClick='() => OpenAtTimeModal(t, "ResumeAt")'>Resume At…</LvButton>
+                                            <LvButton Variant="tonal" Small="true" OnClick="() => StopTimerAsync(t)">Stop</LvButton>
+                                            <LvButton Variant="danger" Small="true" OnClick="() => CancelTimerAsync(t)">Cancel</LvButton>
+                                        }
+                                        @if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Delete))
+                                        {
+                                            <LvButton Variant="outlined" Small="true" OnClick="() => DeleteTimeAsync(t)">Delete</LvButton>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </ChildContent>
+        </LvCard>
+    }
+    else if (_tab == "dates")
+    {
+        <LvCard Title="Job Dates &amp; Milestones" Subtitle="Requires Modify lock to add or edit milestones">
+            <HeaderActions>
+                <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showDateModal = true">+ Add Date / Milestone</LvButton>
+            </HeaderActions>
+            <ChildContent>
+                <div class="lv-table-wrap">
+                    <table class="lv-table">
+                        <thead><tr><th>Label</th><th>Category</th><th>Date</th><th>Status</th><th>Forecast</th></tr></thead>
+                        <tbody>
+                            @foreach (var d in _dates)
+                            {
+                                <tr>
+                                    <td><strong>@d.Label</strong><div><small>@d.Description</small></div></td>
+                                    <td><LvBadge>@d.CategoryLabel</LvBadge></td>
+                                    <td>@(d.CalendarDate.HasValue ? Formatting.FormatCalendarDate(d.CalendarDate.Value) : d.OccurredAtUtc?.ToString("u"))</td>
+                                    <td><LvBadge Tone="@(d.IsActual ? "success" : "warning")">@(d.IsActual ? "Actual" : "Planned") • @d.Status</LvBadge></td>
+                                    <td>@(d.ForecastAmountCents.HasValue ? $"{d.ForecastDirection}: {Formatting.FormatMoney(new MoneyCents(d.ForecastAmountCents.Value, d.ForecastCurrency ?? _job.DefaultCurrency))}" : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </ChildContent>
+        </LvCard>
+    }
+    else if (_tab == "items")
+    {
+        <LvCard Title="Job Sourced Line Items" Subtitle="Job-specific furniture &amp; decor requirements with full audit history (requires Modify lock)">
+            <HeaderActions>
+                <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showLineItemModal = true">+ Add Line Item</LvButton>
+            </HeaderActions>
+            <ChildContent>
+                <div class="lv-table-wrap">
+                    <table class="lv-table">
+                        <thead><tr><th>Item / Room</th><th>Requirements</th><th>Qty</th><th>Cost</th><th>Sell Price</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var li in _lineItems)
+                            {
+                                <tr>
+                                    <td><strong>@li.Title</strong><div><small>@li.RoomOrArea</small></div></td>
+                                    <td>@li.RequirementsNote</td>
+                                    <td>@((li.QuantityMilli / 1000m).ToString("0.###")) @li.Unit</td>
+                                    <td>@Formatting.FormatMoney(new MoneyCents(li.CostCents, li.Currency))</td>
+                                    <td><strong>@Formatting.FormatMoney(new MoneyCents(li.UnitSellPriceCents, li.Currency))</strong></td>
+                                    <td>
+                                        <LvButton Variant="outlined" Small="true" OnClick="() => ShowTimelineAsync(li.Id)">History</LvButton>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </ChildContent>
+        </LvCard>
+    }
+    else if (_tab == "moodboards")
+    {
+        <LvCard Title="Mood Boards &amp; Branded Canvases" Subtitle="Multiple branded canvases per board — add job resources, uploads or text, then Save as PDF">
+            <HeaderActions>
+                <LvButton Small="true" OnClick="() => _showNewBoardModal = true">+ New Mood Board</LvButton>
+            </HeaderActions>
+            <ChildContent>
+                @if (_moodBoards.Count == 0)
+                {
+                    <p>No mood boards yet. Create one to start arranging branded canvases.</p>
+                }
+                else
+                {
+                    <div class="lv-row" style="margin-bottom:14px">
+                        @foreach (var b in _moodBoards)
+                        {
+                            <LvButton Variant="@(b.Id == _selectedBoard?.Id ? "filled" : "tonal")" Small="true" OnClick="() => SelectBoard(b)">@b.Name (@b.Canvases.Count)</LvButton>
+                        }
+                    </div>
+
+                    @if (_selectedBoard is not null)
+                    {
+                        <div class="lv-row" style="margin-bottom:12px">
+                            @foreach (var c in _selectedBoard.Canvases)
+                            {
+                                <LvButton Variant="@(c.Id == _selectedCanvas?.Id ? "filled" : "outlined")" Small="true" OnClick="() => SelectCanvas(c)">@c.Name</LvButton>
+                            }
+                            <LvButton Variant="tonal" Small="true" OnClick="AddCanvasToBoardAsync">+ Add Canvas</LvButton>
+                            <LvButton Variant="outlined" Small="true" OnClick="() => ExportMoodBoardPdfAsync(false)">Save Full Board PDF</LvButton>
+                            @if (_selectedCanvas is not null)
+                            {
+                                <LvButton Variant="outlined" Small="true" OnClick="() => ExportMoodBoardPdfAsync(true)">Save This Canvas PDF</LvButton>
+                            }
+                        </div>
+
+                        @if (_selectedCanvas is not null)
+                        {
+                            <div class="lv-row" style="margin-bottom:12px">
+                                <LvButton Variant="tonal" Small="true" OnClick="AddTextToCanvas">+ Add Text</LvButton>
+                                <LvButton Variant="tonal" Small="true" OnClick="() => _showCanvasImagePicker = true">+ Add Image (Library / Upload)</LvButton>
+                                <LvButton Small="true" Loading="_saving" OnClick="SaveCanvasLayoutAsync">Save Canvas Layout</LvButton>
+                            </div>
+
+                            <div class="lv-canvas-stage" style="background:@_selectedCanvas.BackgroundColorHex">
+                                <div class="lv-canvas-brand-bar" style="background:@_selectedCanvas.Branding.PrimaryColorHex">
+                                    <span>@_selectedCanvas.Branding.CompanyName</span>
+                                    <span>@_selectedBoard.Name • @_selectedCanvas.Name</span>
+                                </div>
+                                @foreach (var el in _canvasElements.OrderBy(e => e.ZIndex))
+                                {
+                                    var leftPct = (el.X / _selectedCanvas.WidthPx * 100.0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                                    var topPct = (el.Y / _selectedCanvas.HeightPx * 100.0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                                    var wPct = (el.Width / _selectedCanvas.WidthPx * 100.0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                                    var hPct = (el.Height / _selectedCanvas.HeightPx * 100.0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                                    <div class="lv-canvas-item @(el.Id == _selectedElementId ? "selected" : "")"
+                                         style="left:@(leftPct)%;top:@(topPct)%;width:@(wPct)%;height:@(hPct)%;z-index:@el.ZIndex"
+                                         @onclick="() => _selectedElementId = el.Id">
+                                        @if (el.ElementType == "Image" && el.ImageAssetId.HasValue)
+                                        {
+                                            <img src="/api/images/@el.ImageAssetId/content" alt="@(el.Caption ?? "Mood board image")" style="width:100%;height:100%;object-fit:contain" />
+                                        }
+                                        else
+                                        {
+                                            <div style="padding:8px;color:@el.TextColorHex;font-size:0.95rem;font-weight:600">@el.TextContent</div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            <h3 style="margin:14px 0 6px;font-size:0.98rem">Accessible Element List &amp; Positioning</h3>
+                            <div class="lv-table-wrap">
+                                <table class="lv-table">
+                                    <thead><tr><th>Type / Content</th><th>X</th><th>Y</th><th>W</th><th>H</th><th>Layer (Z)</th><th></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var el in _canvasElements)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    @if (el.ElementType == "Text")
+                                                    {
+                                                        <input class="lv-input" value="@el.TextContent" @oninput="e => UpdateEl(el.Id, x => x with { TextContent = e.Value?.ToString() })" />
+                                                    }
+                                                    else { <LvBadge Tone="primary">Image</LvBadge> <span>@el.Caption</span> }
+                                                </td>
+                                                <td><input class="lv-input" style="width:72px" type="number" value="@el.X" @onchange="e => UpdateEl(el.Id, x => x with { X = ParseDouble(e.Value, x.X) })" /></td>
+                                                <td><input class="lv-input" style="width:72px" type="number" value="@el.Y" @onchange="e => UpdateEl(el.Id, x => x with { Y = ParseDouble(e.Value, x.Y) })" /></td>
+                                                <td><input class="lv-input" style="width:72px" type="number" value="@el.Width" @onchange="e => UpdateEl(el.Id, x => x with { Width = Math.Max(40, ParseDouble(e.Value, x.Width)) })" /></td>
+                                                <td><input class="lv-input" style="width:72px" type="number" value="@el.Height" @onchange="e => UpdateEl(el.Id, x => x with { Height = Math.Max(40, ParseDouble(e.Value, x.Height)) })" /></td>
+                                                <td><input class="lv-input" style="width:64px" type="number" value="@el.ZIndex" @onchange="e => UpdateEl(el.Id, x => x with { ZIndex = (int)ParseDouble(e.Value, x.ZIndex) })" /></td>
+                                                <td><LvButton Variant="outlined" Small="true" OnClick="() => _canvasElements.RemoveAll(x => x.Id == el.Id)">Remove</LvButton></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                }
+            </ChildContent>
+        </LvCard>
+    }
+    else if (_tab == "finance")
+    {
+        <LvCard Title="Quotes &amp; Invoices" Subtitle="Manual lines, job items, billable time or total-only — with Word .docx template &amp; PDF exports">
+            <HeaderActions>
+                <LvButton Small="true" OnClick='() => OpenNewDocModal("Quote")'>+ New Quote</LvButton>
+                <LvButton Variant="tonal" Small="true" OnClick='() => OpenNewDocModal("Invoice")'>+ New Invoice</LvButton>
+            </HeaderActions>
+            <ChildContent>
+                <div class="lv-table-wrap">
+                    <table class="lv-table">
+                        <thead><tr><th>Number</th><th>Type / Status</th><th>Mode</th><th>Applied Total</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            @foreach (var doc in _documents)
+                            {
+                                <tr>
+                                    <td><strong>@doc.DocumentNumber</strong></td>
+                                    <td><LvBadge Tone="@(doc.Status == "Issued" ? "success" : "warning")">@doc.DocumentType • @doc.Status</LvBadge></td>
+                                    <td><small>@doc.CalculationMode</small></td>
+                                    <td><strong>@Formatting.FormatMoney(new MoneyCents(doc.AppliedTotalCents, doc.Currency))</strong></td>
+                                    <td class="lv-row">
+                                        <LvButton Variant="tonal" Small="true" OnClick="() => DownloadDocxAsync(doc)">Word .docx</LvButton>
+                                        <LvButton Small="true" OnClick="() => DownloadPdfAsync(doc)">Save PDF</LvButton>
+                                        @if (doc.DocumentType == "Quote")
+                                        {
+                                            <LvButton Variant="outlined" Small="true" OnClick="() => ConvertToInvoiceAsync(doc.Id)">To Invoice</LvButton>
+                                        }
+                                        @if (doc.Status == "Draft")
+                                        {
+                                            <LvButton Variant="outlined" Small="true" OnClick="() => IssueDocumentAsync(doc)">Issue</LvButton>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </ChildContent>
+        </LvCard>
+    }
+    else if (_tab == "procurement")
+    {
+        <div class="lv-grid-2">
+            <LvCard Title="Procurement &amp; Orders" Subtitle="Track supplier orders, shipping, installation &amp; payments (requires Modify lock)">
+                <HeaderActions>
+                    <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showProcModal = true">+ Add Order</LvButton>
+                </HeaderActions>
+                <ChildContent>
+                    @foreach (var p in _procurement)
+                    {
+                        <div class="lv-card lv-card-tonal" style="margin-bottom:10px;padding:12px">
+                            <div class="lv-row" style="justify-content:space-between">
+                                <strong>@p.SupplierName (@p.OrderReference)</strong>
+                                <LvBadge Tone="primary">@p.Status</LvBadge>
+                            </div>
+                            <small>Total: @Formatting.FormatMoney(new MoneyCents(p.TotalCostCents, p.Currency)) • Paid: @Formatting.FormatMoney(new MoneyCents(p.PaidCents, p.Currency)) • Outstanding: @Formatting.FormatMoney(new MoneyCents(p.OutstandingCents, p.Currency))</small>
+                        </div>
+                    }
+                </ChildContent>
+            </LvCard>
+
+            <LvCard Title="Paper Receipts" Subtitle="Capture with device camera or upload image (stored at ≤1080p)">
+                <HeaderActions>
+                    <LvButton Small="true" OnClick="() => _showReceiptModal = true">+ Capture / Upload Receipt</LvButton>
+                </HeaderActions>
+                <ChildContent>
+                    @foreach (var r in _receipts)
+                    {
+                        <div class="lv-row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--md-sys-color-outline-variant)">
+                            <div>
+                                <strong>@r.MerchantName</strong>
+                                <div><small>@Formatting.FormatCalendarDate(r.ReceiptDate) • @Formatting.FormatMoney(new MoneyCents(r.AmountCents, r.Currency))</small></div>
+                            </div>
+                            <a class="lv-btn lv-btn-outlined lv-btn-sm" href="/api/images/@r.ImageAssetId/content" target="_blank">View Photo</a>
+                        </div>
+                    }
+                </ChildContent>
+            </LvCard>
+        </div>
+    }
+
+    <!-- Multiple Running Timers Modal -->
+    <LvDialog Open="_showMultiTimerModal" Title="Another Timer Is Currently Running" OnClose="() => _showMultiTimerModal = false">
+        <ChildContent>
+            <p>You currently have running timer(s) on another job:</p>
+            <ul>
+                @foreach (var rt in _runningTimersConflict)
+                {
+                    <li><strong>@rt.JobName</strong> — @Formatting.FormatDuration(rt.LiveDurationSeconds)</li>
+                }
+            </ul>
+            <p>Would you like to stop the existing timer(s) and start this one, or keep multiple timers running concurrently?</p>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showMultiTimerModal = false">Cancel</LvButton>
+            <LvButton Variant="tonal" Loading="_saving" OnClick='() => ResolveMultiTimerAsync("KeepRunning")'>Keep Running &amp; Start</LvButton>
+            <LvButton Loading="_saving" OnClick='() => ResolveMultiTimerAsync("StopExisting")'>Stop Existing &amp; Start</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Stop At / Resume At Preview Modal -->
+    <LvDialog Open="_showAtTimeModal" Title="@(_atTimeAction == "StopAt" ? "Stop Timer At Specific Time" : "Resume Timer At Specific Time")" OnClose="() => _showAtTimeModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div class="lv-field">
+                    <label class="lv-label">Effective Local Time (must be in the past or now)</label>
+                    <input class="lv-input" type="datetime-local" @bind="_atTimeLocal" />
+                </div>
+                <LvButton Variant="tonal" Small="true" OnClick="PreviewAtTimeAsync">Preview Resulting Duration</LvButton>
+                @if (_atTimePreview is not null)
+                {
+                    <div class="lv-banner-success">
+                        Resulting worked duration to date: <strong>@Formatting.FormatDuration(_atTimePreview.ResultingDurationSeconds)</strong>
+                    </div>
+                    @if (_atTimePreview.HasOverlapWarning)
+                    {
+                        <div class="lv-banner-warning">@_atTimePreview.OverlapWarningMessage</div>
+                        <label class="lv-row"><input type="checkbox" @bind="_atTimeConfirmOverlap" /> Confirm intentional overlap</label>
+                    }
+                }
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showAtTimeModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@(_atTimePreview is null)" OnClick="ApplyAtTimeAsync">Confirm &amp; Apply</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Flat Time Entry Modal -->
+    <LvDialog Open="_showFlatModal" Title="Add Flat Time Entry" OnClose="() => _showFlatModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div class="lv-field"><label class="lv-label">Work Date</label><input class="lv-input" type="date" @bind="_flatDate" /></div>
+                <LvTextField Label="Duration (minutes)" InputType="number" Required="true" Value="@_flatMinutes" ValueChanged="v => _flatMinutes = v ?? string.Empty" />
+                <LvTextField Label="Description" Value="@_flatDesc" ValueChanged="v => _flatDesc = v" />
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showFlatModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" OnClick="SaveFlatTimeAsync">Add Time</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Range Time Entry Modal -->
+    <LvDialog Open="_showRangeModal" Title="Add Time Range Entry" OnClose="() => _showRangeModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div class="lv-field"><label class="lv-label">Start Time</label><input class="lv-input" type="datetime-local" @bind="_rangeStart" /></div>
+                <div class="lv-field"><label class="lv-label">End Time</label><input class="lv-input" type="datetime-local" @bind="_rangeEnd" /></div>
+                <LvTextField Label="Description" Value="@_rangeDesc" ValueChanged="v => _rangeDesc = v" />
+                <label class="lv-row"><input type="checkbox" @bind="_rangeConfirmOverlap" /> Confirm if overlapping another entry</label>
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showRangeModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" OnClick="SaveRangeTimeAsync">Add Range</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Add Milestone Modal -->
+    <LvDialog Open="_showDateModal" Title="Add Job Date / Milestone" OnClose="() => _showDateModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <LvTextField Label="Label" Required="true" Value="@_dateLabel" ValueChanged="v => _dateLabel = v ?? string.Empty" Placeholder="e.g. Installation Day" />
+                <LvTextField Label="Category" Value="@_dateCat" ValueChanged="v => _dateCat = v ?? string.Empty" />
+                <div class="lv-field"><label class="lv-label">Calendar Date</label><input class="lv-input" type="date" @bind="_dateVal" /></div>
+                <LvTextField Label="Optional Forecast Amount (e.g. 5000.00)" Value="@_dateForecastAmt" ValueChanged="v => _dateForecastAmt = v ?? string.Empty" />
+                <div class="lv-field">
+                    <label class="lv-label">Forecast Direction</label>
+                    <select class="lv-select" @bind="_dateForecastDir"><option value="None">None</option><option value="Revenue">Revenue</option><option value="Cost">Cost</option></select>
+                </div>
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showDateModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_dateLabel)" OnClick="SaveDateAsync">Save Milestone</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Add Job Line Item Modal -->
+    <LvDialog Open="_showLineItemModal" Title="Add Job Line Item" OnClose="() => _showLineItemModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <LvTextField Label="Title" Required="true" Value="@_liTitle" ValueChanged="v => _liTitle = v ?? string.Empty" />
+                <LvTextField Label="Room / Area" Value="@_liRoom" ValueChanged="v => _liRoom = v" />
+                <LvTextField Label="Specific Requirements (e.g. Black frame, 500x760mm)" Multiline="true" Value="@_liReq" ValueChanged="v => _liReq = v" />
+                <div class="lv-grid-3">
+                    <LvTextField Label="Qty" InputType="number" Value="@_liQty" ValueChanged="v => _liQty = v ?? string.Empty" />
+                    <LvTextField Label="Our Cost" Value="@_liCost" ValueChanged="v => _liCost = v ?? string.Empty" />
+                    <LvTextField Label="Sell Price" Value="@_liSell" ValueChanged="v => _liSell = v ?? string.Empty" />
+                </div>
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showLineItemModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_liTitle)" OnClick="SaveLineItemAsync">Add Item</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Line Item Audit Timeline Modal -->
+    <LvDialog Open="_showTimelineModal" Title="Line Item Audit History" OnClose="() => _showTimelineModal = false">
+        @foreach (var a in _timelineEntries)
+        {
+            <div class="lv-card lv-card-tonal" style="margin-bottom:8px;padding:10px">
+                <strong>@a.Operation</strong> by @a.ActorDisplayName at @a.OccurredAtUtc.ToString("u")
+            </div>
+        }
+    </LvDialog>
+
+    <!-- New Mood Board Modal -->
+    <LvDialog Open="_showNewBoardModal" Title="Create Mood Board" OnClose="() => _showNewBoardModal = false">
+        <ChildContent>
+            <LvTextField Label="Board Name" Required="true" Value="@_newBoardName" ValueChanged="v => _newBoardName = v ?? string.Empty" />
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showNewBoardModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_newBoardName)" OnClick="CreateBoardAsync">Create Board</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Canvas Image Picker / External Upload Modal -->
+    <LvDialog Open="_showCanvasImagePicker" Title="Add Image to Canvas" OnClose="() => _showCanvasImagePicker = false">
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <strong>Upload External Image (auto-resized to ≤1080p)</strong>
+            <InputFile OnChange="UploadImageToCanvasAsync" accept="image/jpeg,image/png,image/webp" />
+            <strong>Or Select from Library / Job Resources</strong>
+            <div class="lv-grid-3">
+                @foreach (var img in _availableImages)
+                {
+                    <div class="lv-card" style="padding:8px;cursor:pointer" @onclick="() => AddLibraryImageToCanvas(img)">
+                        <img src="/api/images/@img.Id/content?thumb=true" alt="@img.Title" style="width:100%;height:80px;object-fit:cover;border-radius:4px" />
+                        <small>@img.Title</small>
+                    </div>
+                }
+            </div>
+        </div>
+    </LvDialog>
+
+    <!-- New Quote / Invoice Modal -->
+    <LvDialog Open="_showNewDocModal" Title="@($"Create {_newDocType}")" OnClose="() => _showNewDocModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div class="lv-field">
+                    <label class="lv-label">Calculation Mode</label>
+                    <select class="lv-select" @bind="_newDocMode">
+                        <option value="LineCalculated">Line-Based (Calculated Total + GST)</option>
+                        <option value="TotalOnly">Manual Total-Only (No Lines)</option>
+                    </select>
+                </div>
+                @if (_newDocMode == "TotalOnly")
+                {
+                    <LvTextField Label="Manual Total Amount" Required="true" Value="@_newDocManualTotal" ValueChanged="v => _newDocManualTotal = v ?? string.Empty" />
+                }
+                else
+                {
+                    <LvTextField Label="Manual Line Description" Value="@_newDocLineTitle" ValueChanged="v => _newDocLineTitle = v ?? string.Empty" Placeholder="e.g. Design Consultation Fee" />
+                    <div class="lv-grid-2">
+                        <LvTextField Label="Unit Price" Value="@_newDocLinePrice" ValueChanged="v => _newDocLinePrice = v ?? string.Empty" />
+                        <LvTextField Label="Quantity" InputType="number" Value="@_newDocLineQty" ValueChanged="v => _newDocLineQty = v ?? string.Empty" />
+                    </div>
+                    <LvTextField Label="Discount Amount (optional)" Value="@_newDocDiscount" ValueChanged="v => _newDocDiscount = v ?? string.Empty" />
+                    <label class="lv-row" style="font-size:0.86rem">
+                        <input type="checkbox" @bind="_newDocIncludeJobItems" /> Include all @_lineItems.Count job line item(s)
+                    </label>
+                }
+                <LvTextField Label="Notes" Multiline="true" Value="@_newDocNotes" ValueChanged="v => _newDocNotes = v" />
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showNewDocModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" OnClick="CreateDocumentAsync">Create @_newDocType</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- New Procurement Modal -->
+    <LvDialog Open="_showProcModal" Title="Add Procurement Order" OnClose="() => _showProcModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <LvTextField Label="Supplier Name" Required="true" Value="@_procSupplier" ValueChanged="v => _procSupplier = v ?? string.Empty" />
+                <LvTextField Label="Order Reference" Value="@_procRef" ValueChanged="v => _procRef = v" />
+                <LvTextField Label="Total Cost" Value="@_procCost" ValueChanged="v => _procCost = v ?? string.Empty" />
+                <LvTextField Label="Shipping / Installation Notes" Multiline="true" Value="@_procNotes" ValueChanged="v => _procNotes = v" />
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showProcModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_procSupplier)" OnClick="SaveProcurementAsync">Save Order</LvButton>
+        </Actions>
+    </LvDialog>
+
+    <!-- Upload Receipt Modal (supports device camera via capture attribute) -->
+    <LvDialog Open="_showReceiptModal" Title="Capture or Upload Paper Receipt" OnClose="() => _showReceiptModal = false">
+        <ChildContent>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div class="lv-banner-warning" style="font-size:0.82rem">Receipt photos are resized to at most 1080p; check legibility after upload.</div>
+                <LvTextField Label="Merchant Name" Required="true" Value="@_recMerchant" ValueChanged="v => _recMerchant = v ?? string.Empty" />
+                <div class="lv-grid-2">
+                    <div class="lv-field"><label class="lv-label">Receipt Date</label><input class="lv-input" type="date" @bind="_recDate" /></div>
+                    <LvTextField Label="Amount" Required="true" Value="@_recAmount" ValueChanged="v => _recAmount = v ?? string.Empty" />
+                </div>
+                <div class="lv-field">
+                    <label class="lv-label">Photo (Camera or File) <span class="lv-required">*</span></label>
+                    <InputFile OnChange="OnReceiptFileSelected" accept="image/*" capture="environment" />
+                </div>
+            </div>
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" OnClick="() => _showReceiptModal = false">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@(_recBytes is null || string.IsNullOrWhiteSpace(_recMerchant))" OnClick="SaveReceiptAsync">Upload Receipt</LvButton>
+        </Actions>
+    </LvDialog>
+}
+
+@code {
+    [Parameter] public Guid JobId { get; set; }
+
+    private sealed class JobDraft
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Status { get; set; } = "Active";
+        public string TimeZoneIana { get; set; } = "Australia/Sydney";
+        public string DefaultCurrency { get; set; } = "AUD";
+        public string? PoNumber { get; set; }
+        public string HourlyRateInput { get; set; } = "0.00";
+        public string? Notes { get; set; }
+    }
+
+    private JobDto? _job;
+    private EditLockStatusDto? _lockStatus;
+    private JobDraft _jobDraft = new();
+    private readonly LvDirtyTracker<JobDraft> _jobDirty = new();
+    private string _tab = "overview";
+    private bool _loading = true;
+    private bool _saving;
+    private ApiErrorResponse? _error;
+    private string? _notice;
+
+    private List<JobDateDto> _dates = [];
+    private List<TimeEntryDto> _timeEntries = [];
+    private List<JobLineItemDto> _lineItems = [];
+    private List<MoodBoardDto> _moodBoards = [];
+    private MoodBoardDto? _selectedBoard;
+    private MoodBoardCanvasDto? _selectedCanvas;
+    private List<MoodBoardElementDto> _canvasElements = [];
+    private Guid? _selectedElementId;
+    private List<ImageAssetDto> _availableImages = [];
+    private List<FinancialDocumentDto> _documents = [];
+    private List<ProcurementItemDto> _procurement = [];
+    private List<ReceiptDto> _receipts = [];
+
+    // Modals state
+    private bool _showMultiTimerModal;
+    private List<RunningTimerSummaryDto> _runningTimersConflict = [];
+    private bool _showAtTimeModal;
+    private TimeEntryDto? _atTimeTarget;
+    private string _atTimeAction = "StopAt";
+    private DateTime _atTimeLocal = DateTime.Now.AddMinutes(-5);
+    private TimerAdjustmentPreviewDto? _atTimePreview;
+    private bool _atTimeConfirmOverlap;
+
+    private bool _showFlatModal;
+    private DateOnly _flatDate = DateOnly.FromDateTime(DateTime.Now);
+    private string _flatMinutes = "60";
+    private string? _flatDesc;
+
+    private bool _showRangeModal;
+    private DateTime _rangeStart = DateTime.Now.AddHours(-1);
+    private DateTime _rangeEnd = DateTime.Now;
+    private string? _rangeDesc;
+    private bool _rangeConfirmOverlap;
+
+    private bool _showDateModal;
+    private string _dateLabel = string.Empty;
+    private string _dateCat = "Milestone";
+    private DateOnly _dateVal = DateOnly.FromDateTime(DateTime.Now);
+    private string _dateForecastAmt = string.Empty;
+    private string _dateForecastDir = "None";
+
+    private bool _showLineItemModal;
+    private string _liTitle = string.Empty;
+    private string? _liRoom;
+    private string? _liReq;
+    private string _liQty = "1";
+    private string _liCost = "0.00";
+    private string _liSell = "0.00";
+
+    private bool _showTimelineModal;
+    private List<AuditEntryDto> _timelineEntries = [];
+
+    private bool _showNewBoardModal;
+    private string _newBoardName = string.Empty;
+    private bool _showCanvasImagePicker;
+
+    private bool _showNewDocModal;
+    private string _newDocType = "Quote";
+    private string _newDocMode = "LineCalculated";
+    private string _newDocManualTotal = "0.00";
+    private string _newDocLineTitle = string.Empty;
+    private string _newDocLinePrice = "0.00";
+    private string _newDocLineQty = "1";
+    private string _newDocDiscount = "0.00";
+    private bool _newDocIncludeJobItems = true;
+    private string? _newDocNotes;
+
+    private bool _showProcModal;
+    private string _procSupplier = string.Empty;
+    private string? _procRef;
+    private string _procCost = "0.00";
+    private string? _procNotes;
+
+    private bool _showReceiptModal;
+    private string _recMerchant = string.Empty;
+    private DateOnly _recDate = DateOnly.FromDateTime(DateTime.Now);
+    private string _recAmount = "0.00";
+    private byte[]? _recBytes;
+    private string _recFileName = "receipt.jpg";
+    private string _recContentType = "image/jpeg";
+
+    private bool CanEditJob => _lockStatus?.IsHeldByCurrentSession == true;
+
+    protected override Task OnParametersSetAsync() => LoadAllAsync();
+
+    private async Task LoadAllAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var jResp = await Api.GetAsync<JobDto>($"/api/jobs/{JobId}");
+            if (!jResp.IsSuccess || jResp.Data is null) { _error = jResp.Error; return; }
+            _job = jResp.Data;
+            _jobDraft = new JobDraft
+            {
+                Name = _job.Name,
+                Status = _job.Status,
+                TimeZoneIana = _job.TimeZoneIana,
+                DefaultCurrency = _job.DefaultCurrency,
+                PoNumber = _job.PoNumber,
+                HourlyRateInput = new MoneyCents(_job.DefaultHourlyRateCents, _job.DefaultCurrency).ToHumanDecimal().ToString("F2"),
+                Notes = _job.Notes
+            };
+            _jobDirty.SetBaseline(_jobDraft);
+
+            var lResp = await Api.GetAsync<EditLockStatusDto>($"/api/locks/Job/{JobId}");
+            if (lResp.IsSuccess) _lockStatus = lResp.Data;
+
+            await RefreshTabDataAsync();
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _tab = tab;
+        _error = null;
+        _notice = null;
+        await RefreshTabDataAsync();
+    }
+
+    private async Task RefreshTabDataAsync()
+    {
+        var tResp = await Api.GetAsync<List<TimeEntryDto>>($"/api/jobs/{JobId}/time?includeDeleted=false");
+        if (tResp.IsSuccess && tResp.Data is not null) _timeEntries = tResp.Data;
+
+        var dResp = await Api.GetAsync<List<JobDateDto>>($"/api/jobs/{JobId}/dates");
+        if (dResp.IsSuccess && dResp.Data is not null) _dates = dResp.Data;
+
+        var liResp = await Api.GetAsync<List<JobLineItemDto>>($"/api/jobs/{JobId}/line-items");
+        if (liResp.IsSuccess && liResp.Data is not null) _lineItems = liResp.Data;
+
+        var mbResp = await Api.GetAsync<List<MoodBoardDto>>($"/api/jobs/{JobId}/mood-boards");
+        if (mbResp.IsSuccess && mbResp.Data is not null)
+        {
+            _moodBoards = mbResp.Data;
+            if (_selectedBoard is null && _moodBoards.Count > 0) SelectBoard(_moodBoards[0]);
+            else if (_selectedBoard is not null)
+            {
+                var updated = _moodBoards.FirstOrDefault(b => b.Id == _selectedBoard.Id);
+                if (updated is not null) SelectBoard(updated);
+            }
+        }
+
+        var imgResp = await Api.GetAsync<PagedResult<ImageAssetDto>>("/api/images?page=1&pageSize=30");
+        if (imgResp.IsSuccess && imgResp.Data is not null) _availableImages = imgResp.Data.Items.ToList();
+
+        var docResp = await Api.GetAsync<List<FinancialDocumentDto>>($"/api/jobs/{JobId}/documents");
+        if (docResp.IsSuccess && docResp.Data is not null) _documents = docResp.Data;
+
+        var pResp = await Api.GetAsync<List<ProcurementItemDto>>($"/api/jobs/{JobId}/procurement");
+        if (pResp.IsSuccess && pResp.Data is not null) _procurement = pResp.Data;
+
+        var rResp = await Api.GetAsync<List<ReceiptDto>>($"/api/jobs/{JobId}/receipts");
+        if (rResp.IsSuccess && rResp.Data is not null) _receipts = rResp.Data;
+
+        var actResp = await Api.GetAsync<List<TimeEntryDto>>("/api/time/active");
+        if (actResp.IsSuccess && actResp.Data is not null) AppState.UpdateActiveTimers(actResp.Data);
+    }
+
+    // --- Exclusive Modify Lock Actions ---
+    private async Task RequestModifyAsync()
+    {
+        _error = null;
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _lockStatus = resp.Data;
+        _notice = _lockStatus!.IsHeldByCurrentSession ? "Exclusive Modify lock acquired." : $"Added to FIFO queue at position {_lockStatus.QueuePosition}.";
+    }
+
+    private async Task ClaimTurnAsync()
+    {
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/claim", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        await LoadAllAsync();
+        _notice = "Turn claimed and latest version loaded.";
+    }
+
+    private async Task ReleaseLockAsync()
+    {
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId, LeaseId = _lockStatus?.LeaseId, FencingVersion = _lockStatus?.FencingVersion });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _lockStatus = resp.Data;
+        _notice = "Edit lock released.";
+    }
+
+    private async Task CancelQueueAsync()
+    {
+        var resp = await Api.PostAsync<EditLockStatusDto>("/api/locks/cancel-queue", new EditLockActionRequest { RecordType = LockableRecordTypes.Job, RecordId = JobId });
+        if (resp.IsSuccess) _lockStatus = resp.Data;
+    }
+
+    private async Task SaveJobOverviewAsync()
+    {
+        if (_job is null) return;
+        _saving = true; _error = null;
+        try
+        {
+            var rate = Formatting.ParseMoneyInput(_jobDraft.HourlyRateInput, _jobDraft.DefaultCurrency);
+            var resp = await Api.PutAsync<JobDto>($"/api/jobs/{JobId}", new UpsertJobRequest
+            {
+                JobGroupId = _job.JobGroupId,
+                Name = _jobDraft.Name,
+                Status = _jobDraft.Status,
+                TimeZoneIana = _jobDraft.TimeZoneIana,
+                DefaultCurrency = _jobDraft.DefaultCurrency,
+                PoNumber = _jobDraft.PoNumber,
+                DefaultHourlyRateCents = rate.Cents,
+                Notes = _jobDraft.Notes,
+                ConcurrencyToken = _job.ConcurrencyToken,
+                LeaseId = _lockStatus?.LeaseId,
+                FencingVersion = _lockStatus?.FencingVersion
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            await LoadAllAsync();
+            _notice = "Job saved.";
+        }
+        catch (Exception ex) { _error = new ApiErrorResponse { Code = "LAV-VAL-001", Message = ex.Message, PossibleCause = "Check input values.", CorrelationId = "ui" }; }
+        finally { _saving = false; }
+    }
+
+    // --- Time Tracking ---
+    private async Task StartTimerAsync(bool force)
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<StartTimerResultDto>("/api/time/start", new StartTimerRequest { JobId = JobId, Description = "Job work" });
+            if (!resp.IsSuccess || resp.Data is null) { _error = resp.Error; return; }
+            if (resp.Data.RequiresMultiTimerChoice)
+            {
+                _runningTimersConflict = resp.Data.RunningTimersOnOtherJobs.ToList();
+                _showMultiTimerModal = true;
+                return;
+            }
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task ResolveMultiTimerAsync(string choice)
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<StartTimerResultDto>("/api/time/start", new StartTimerRequest
+            {
+                JobId = JobId,
+                Description = "Job work",
+                ConflictResolution = choice,
+                ObservedRunningTimers = _runningTimersConflict.Select(x => new ObservedRunningTimerRef { TimeEntryId = x.TimeEntryId, ConcurrencyToken = x.ConcurrencyToken }).ToArray()
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showMultiTimerModal = false;
+            await RefreshTabDataAsync();
+            _notice = choice == "StopExisting" ? "Stopped previous timer(s) and started new timer." : "Started concurrent timer (flagged for billing review).";
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task PauseTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/pause?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+    private async Task ResumeTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/resume?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+    private async Task StopTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/stop?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+    private async Task CancelTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/cancel?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+    private async Task DeleteTimeAsync(TimeEntryDto t) { await Api.DeleteAsync($"/api/time/{t.Id}?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+
+    private void OpenAtTimeModal(TimeEntryDto t, string action)
+    {
+        _atTimeTarget = t;
+        _atTimeAction = action;
+        _atTimeLocal = DateTime.Now.AddMinutes(-5);
+        _atTimePreview = null;
+        _atTimeConfirmOverlap = false;
+        _showAtTimeModal = true;
+    }
+
+    private async Task PreviewAtTimeAsync()
+    {
+        if (_atTimeTarget is null) return;
+        _error = null;
+        var utc = new DateTimeOffset(_atTimeLocal).ToUniversalTime();
+        var ep = _atTimeAction == "StopAt" ? "preview-stop-at" : "preview-resume-at";
+        var resp = await Api.PostAsync<TimerAdjustmentPreviewDto>($"/api/time/{_atTimeTarget.Id}/{ep}?effectiveTimeUtc={Uri.EscapeDataString(utc.ToString("O"))}");
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _atTimePreview = resp.Data;
+    }
+
+    private async Task ApplyAtTimeAsync()
+    {
+        if (_atTimeTarget is null || _atTimePreview is null) return;
+        _saving = true; _error = null;
+        try
+        {
+            var ep = _atTimeAction == "StopAt" ? "stop-at" : "resume-at";
+            var resp = await Api.PostAsync<TimeEntryDto>($"/api/time/{_atTimeTarget.Id}/{ep}", new TimerAtTimeRequest
+            {
+                EffectiveTimeUtc = _atTimePreview.EffectiveTimeUtc,
+                ConcurrencyToken = _atTimePreview.ConcurrencyToken,
+                Confirmed = true,
+                ConfirmOverlap = _atTimeConfirmOverlap
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showAtTimeModal = false;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task SaveFlatTimeAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var mins = long.TryParse(_flatMinutes, out var m) ? m : 0;
+            var resp = await Api.PostAsync<TimeEntryDto>("/api/time/flat", new CreateFlatTimeEntryRequest { JobId = JobId, WorkDate = _flatDate, DurationSeconds = mins * 60, Description = _flatDesc });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showFlatModal = false;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task SaveRangeTimeAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<TimeEntryDto>("/api/time/range", new CreateRangeTimeEntryRequest
+            {
+                JobId = JobId,
+                StartedAtUtc = new DateTimeOffset(_rangeStart).ToUniversalTime(),
+                EndedAtUtc = new DateTimeOffset(_rangeEnd).ToUniversalTime(),
+                Description = _rangeDesc,
+                ConfirmOverlap = _rangeConfirmOverlap
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showRangeModal = false;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    // --- Dates & Line Items ---
+    private async Task SaveDateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            long? amtCents = string.IsNullOrWhiteSpace(_dateForecastAmt) ? null : Formatting.ParseMoneyInput(_dateForecastAmt, _job!.DefaultCurrency).Cents;
+            var resp = await Api.PostAsync<JobDateDto>($"/api/jobs/{JobId}/dates", new UpsertJobDateRequest
+            {
+                Label = _dateLabel,
+                CategoryKey = _dateCat.ToLowerInvariant().Replace(" ", "_"),
+                CategoryLabel = _dateCat,
+                Status = "Planned",
+                CalendarDate = _dateVal,
+                ForecastAmountCents = amtCents,
+                ForecastCurrency = amtCents.HasValue ? _job!.DefaultCurrency : null,
+                ForecastDirection = _dateForecastDir,
+                LeaseId = _lockStatus?.LeaseId,
+                FencingVersion = _lockStatus?.FencingVersion
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showDateModal = false; _dateLabel = string.Empty;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task SaveLineItemAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var qty = decimal.TryParse(_liQty, out var q) ? (long)(q * 1000m) : 1000L;
+            var cost = Formatting.ParseMoneyInput(_liCost, _job!.DefaultCurrency);
+            var sell = Formatting.ParseMoneyInput(_liSell, _job.DefaultCurrency);
+            var resp = await Api.PostAsync<JobLineItemDto>($"/api/jobs/{JobId}/line-items", new UpsertJobLineItemRequest
+            {
+                Title = _liTitle,
+                RoomOrArea = _liRoom,
+                RequirementsNote = _liReq,
+                QuantityMilli = qty,
+                Currency = _job.DefaultCurrency,
+                CostCents = cost.Cents,
+                RrpCents = sell.Cents,
+                UnitSellPriceCents = sell.Cents,
+                LeaseId = _lockStatus?.LeaseId,
+                FencingVersion = _lockStatus?.FencingVersion
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showLineItemModal = false; _liTitle = string.Empty;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task ShowTimelineAsync(Guid lineItemId)
+    {
+        var resp = await Api.GetAsync<List<AuditEntryDto>>($"/api/line-items/{lineItemId}/timeline");
+        if (resp.IsSuccess && resp.Data is not null) { _timelineEntries = resp.Data; _showTimelineModal = true; }
+    }
+
+    // --- Mood Boards ---
+    private void SelectBoard(MoodBoardDto b)
+    {
+        _selectedBoard = b;
+        var target = _selectedCanvas is not null ? b.Canvases.FirstOrDefault(c => c.Id == _selectedCanvas.Id) : null;
+        SelectCanvas(target ?? b.Canvases.FirstOrDefault());
+    }
+
+    private void SelectCanvas(MoodBoardCanvasDto? c)
+    {
+        _selectedCanvas = c;
+        _canvasElements = c?.Elements.ToList() ?? [];
+    }
+
+    private async Task CreateBoardAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var resp = await Api.PostAsync<MoodBoardDto>($"/api/jobs/{JobId}/mood-boards", new UpsertMoodBoardRequest { Name = _newBoardName });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showNewBoardModal = false; _newBoardName = string.Empty;
+            await RefreshTabDataAsync();
+            if (resp.Data is not null) SelectBoard(resp.Data);
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task AddCanvasToBoardAsync()
+    {
+        if (_selectedBoard is null) return;
+        var resp = await Api.PostAsync<MoodBoardCanvasDto>($"/api/mood-boards/{_selectedBoard.Id}/canvases", new UpsertCanvasRequest { Name = $"Canvas {_selectedBoard.Canvases.Count + 1}" });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        await RefreshTabDataAsync();
+    }
+
+    private void AddTextToCanvas()
+    {
+        _canvasElements.Add(new MoodBoardElementDto
+        {
+            Id = Guid.NewGuid(),
+            ElementType = "Text",
+            TextContent = "Room concept notes",
+            FontSizePx = 28,
+            TextColorHex = _selectedCanvas?.Branding.TextColorHex ?? "#1F1B16",
+            X = 80,
+            Y = 120,
+            Width = 420,
+            Height = 90,
+            ZIndex = _canvasElements.Count + 1
+        });
+    }
+
+    private void AddLibraryImageToCanvas(ImageAssetDto img)
+    {
+        _canvasElements.Add(new MoodBoardElementDto
+        {
+            Id = Guid.NewGuid(),
+            ElementType = "Image",
+            ImageAssetId = img.Id,
+            Caption = img.Title,
+            FontSizePx = 16,
+            TextColorHex = "#1F1B16",
+            X = 60 + (_canvasElements.Count * 40),
+            Y = 120,
+            Width = 420,
+            Height = 300,
+            ZIndex = _canvasElements.Count + 1
+        });
+        _showCanvasImagePicker = false;
+    }
+
+    private async Task UploadImageToCanvasAsync(InputFileChangeEventArgs e)
+    {
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(25 * 1024 * 1024).CopyToAsync(ms);
+        var fields = new Dictionary<string, string?>
+        {
+            ["title"] = Path.GetFileNameWithoutExtension(e.File.Name),
+            ["rightsConfirmed"] = "true",
+            ["isGlobalLibrary"] = "false",
+            ["jobId"] = JobId.ToString("D"),
+            ["moodBoardId"] = _selectedBoard?.Id.ToString("D")
+        };
+        var resp = await Api.UploadFileAsync<ImageAssetDto>("/api/images/upload", fields, e.File.Name, e.File.ContentType, ms.ToArray());
+        if (!resp.IsSuccess || resp.Data is null) { _error = resp.Error; return; }
+        AddLibraryImageToCanvas(resp.Data);
+    }
+
+    private async Task SaveCanvasLayoutAsync()
+    {
+        if (_selectedCanvas is null) return;
+        _saving = true; _error = null;
+        try
+        {
+            var resp = await Api.PutAsync<MoodBoardCanvasDto>($"/api/mood-board-canvases/{_selectedCanvas.Id}/elements", new SaveCanvasElementsRequest
+            {
+                ConcurrencyToken = _selectedCanvas.ConcurrencyToken,
+                Elements = _canvasElements
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            await RefreshTabDataAsync();
+            _notice = "Canvas layout saved.";
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task ExportMoodBoardPdfAsync(bool singleCanvas)
+    {
+        if (_selectedBoard is null) return;
+        var url = $"/api/mood-boards/{_selectedBoard.Id}/pdf" + (singleCanvas && _selectedCanvas is not null ? $"?canvasId={_selectedCanvas.Id}" : string.Empty);
+        var resp = await Api.PostAsync<GeneratedArtifactDto>(url);
+        if (!resp.IsSuccess || resp.Data is null) { _error = resp.Error; return; }
+        await Api.DownloadUrlAsync($"/api/artifacts/{resp.Data.Id}/download");
+        _notice = $"Mood board PDF '{resp.Data.FileName}' saved and downloading.";
+    }
+
+    private void UpdateEl(Guid id, Func<MoodBoardElementDto, MoodBoardElementDto> mutator)
+    {
+        var idx = _canvasElements.FindIndex(x => x.Id == id);
+        if (idx >= 0) _canvasElements[idx] = mutator(_canvasElements[idx]);
+    }
+
+    private static double ParseDouble(object? val, double fallback)
+        => double.TryParse(val?.ToString(), out var d) ? d : fallback;
+
+    // --- Quotes & Invoices ---
+    private void OpenNewDocModal(string docType)
+    {
+        _newDocType = docType;
+        _newDocMode = "LineCalculated";
+        _newDocLineTitle = string.Empty;
+        _newDocLinePrice = "0.00";
+        _newDocLineQty = "1";
+        _newDocDiscount = "0.00";
+        _newDocManualTotal = "0.00";
+        _showNewDocModal = true;
+    }
+
+    private async Task CreateDocumentAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var lines = new List<SaveFinancialDocumentLineInput>();
+            var adjs = new List<SaveFinancialDocumentAdjustmentInput>();
+
+            if (_newDocMode != "TotalOnly")
+            {
+                if (_newDocIncludeJobItems)
+                {
+                    foreach (var li in _lineItems)
+                    {
+                        lines.Add(new SaveFinancialDocumentLineInput
+                        {
+                            LineSourceType = "JobLineItem",
+                            SourceEntityId = li.Id,
+                            SourceEntityVersion = li.ConcurrencyToken,
+                            Title = li.Title,
+                            Details = li.RequirementsNote,
+                            QuantityMilli = li.QuantityMilli,
+                            UnitLabel = li.Unit,
+                            UnitPriceCents = li.UnitSellPriceCents,
+                            InternalUnitCostCents = li.CostCents
+                        });
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(_newDocLineTitle))
+                {
+                    var price = Formatting.ParseMoneyInput(_newDocLinePrice, _job!.DefaultCurrency);
+                    var qty = decimal.TryParse(_newDocLineQty, out var q) ? (long)(q * 1000m) : 1000L;
+                    lines.Add(new SaveFinancialDocumentLineInput { Title = _newDocLineTitle, QuantityMilli = qty, UnitPriceCents = price.Cents });
+                }
+                var disc = Formatting.ParseMoneyInput(string.IsNullOrWhiteSpace(_newDocDiscount) ? "0" : _newDocDiscount, _job!.DefaultCurrency);
+                if (disc.Cents > 0)
+                {
+                    adjs.Add(new SaveFinancialDocumentAdjustmentInput { AdjustmentType = "Discount", Description = "Discount", AmountCents = disc.Cents, IsPreTax = true });
+                }
+            }
+
+            long? manualCents = _newDocMode == "TotalOnly" ? Formatting.ParseMoneyInput(_newDocManualTotal, _job!.DefaultCurrency).Cents : null;
+
+            var resp = await Api.PostAsync<FinancialDocumentDto>("/api/documents", new CreateFinancialDocumentRequest
+            {
+                JobId = JobId,
+                DocumentType = _newDocType,
+                CalculationMode = _newDocMode,
+                Currency = _job!.DefaultCurrency,
+                ManualTotalCents = manualCents,
+                Notes = _newDocNotes,
+                Lines = lines,
+                Adjustments = adjs
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showNewDocModal = false;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task DownloadDocxAsync(FinancialDocumentDto doc)
+    {
+        var resp = await Api.PostAsync<GeneratedArtifactDto>($"/api/documents/{doc.Id}/docx?isDraft={(doc.Status == "Draft")}");
+        if (!resp.IsSuccess || resp.Data is null) { _error = resp.Error; return; }
+        await Api.DownloadUrlAsync($"/api/artifacts/{resp.Data.Id}/download");
+    }
+
+    private async Task DownloadPdfAsync(FinancialDocumentDto doc)
+    {
+        var resp = await Api.PostAsync<GeneratedArtifactDto>($"/api/documents/{doc.Id}/pdf?isDraft={(doc.Status == "Draft")}");
+        if (!resp.IsSuccess || resp.Data is null) { _error = resp.Error; return; }
+        await Api.DownloadUrlAsync($"/api/artifacts/{resp.Data.Id}/download");
+    }
+
+    private async Task ConvertToInvoiceAsync(Guid quoteId)
+    {
+        var resp = await Api.PostAsync<FinancialDocumentDto>($"/api/documents/{quoteId}/convert-to-invoice");
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        await RefreshTabDataAsync();
+        _notice = $"Converted quote to invoice draft {resp.Data!.DocumentNumber}.";
+    }
+
+    private async Task IssueDocumentAsync(FinancialDocumentDto doc)
+    {
+        _error = null;
+        var lResp = await Api.PostAsync<EditLockStatusDto>("/api/locks/modify", new EditLockActionRequest { RecordType = doc.DocumentType, RecordId = doc.Id });
+        if (!lResp.IsSuccess || lResp.Data is null || !lResp.Data.IsHeldByCurrentSession) { _error = lResp.Error; return; }
+
+        var resp = await Api.PostAsync<FinancialDocumentDto>($"/api/documents/{doc.Id}/issue?token={Uri.EscapeDataString(doc.ConcurrencyToken)}&leaseId={lResp.Data.LeaseId}&fencingVersion={lResp.Data.FencingVersion}");
+        await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest { RecordType = doc.DocumentType, RecordId = doc.Id, LeaseId = lResp.Data.LeaseId, FencingVersion = lResp.Data.FencingVersion });
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        await RefreshTabDataAsync();
+        _notice = $"Issued {doc.DocumentNumber} with immutable Word and PDF snapshots.";
+    }
+
+    // --- Procurement & Receipts ---
+    private async Task SaveProcurementAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var cost = Formatting.ParseMoneyInput(_procCost, _job!.DefaultCurrency);
+            var resp = await Api.PostAsync<ProcurementItemDto>($"/api/jobs/{JobId}/procurement", new UpsertProcurementItemRequest
+            {
+                SupplierName = _procSupplier,
+                OrderReference = _procRef,
+                Status = "Ordered",
+                Currency = _job.DefaultCurrency,
+                TotalCostCents = cost.Cents,
+                Notes = _procNotes,
+                LeaseId = _lockStatus?.LeaseId,
+                FencingVersion = _lockStatus?.FencingVersion
+            });
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showProcModal = false; _procSupplier = string.Empty;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task OnReceiptFileSelected(InputFileChangeEventArgs e)
+    {
+        _recFileName = e.File.Name;
+        _recContentType = e.File.ContentType;
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(25 * 1024 * 1024).CopyToAsync(ms);
+        _recBytes = ms.ToArray();
+    }
+
+    private async Task SaveReceiptAsync()
+    {
+        if (_recBytes is null) return;
+        _saving = true; _error = null;
+        try
+        {
+            var amt = Formatting.ParseMoneyInput(_recAmount, _job!.DefaultCurrency);
+            var fields = new Dictionary<string, string?>
+            {
+                ["merchantName"] = _recMerchant,
+                ["receiptDate"] = _recDate.ToString("yyyy-MM-dd"),
+                ["currency"] = _job.DefaultCurrency,
+                ["amountCents"] = amt.Cents.ToString()
+            };
+            var resp = await Api.UploadFileAsync<ReceiptDto>($"/api/jobs/{JobId}/receipts", fields, _recFileName, _recContentType, _recBytes);
+            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            _showReceiptModal = false; _recBytes = null; _recMerchant = string.Empty;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}

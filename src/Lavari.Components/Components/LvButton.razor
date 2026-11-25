@@ -1,0 +1,30 @@
+<button type="@Type"
+        class="lv-btn @VariantClass @(Small ? "lv-btn-sm" : "") @Class"
+        disabled="@(Disabled || Loading)"
+        aria-busy="@Loading"
+        @onclick="OnClick">
+    @if (Loading)
+    {
+        <span class="lv-spinner" aria-hidden="true"></span>
+    }
+    @ChildContent
+</button>
+
+@code {
+    [Parameter] public string Variant { get; set; } = "filled"; // filled, tonal, outlined, danger
+    [Parameter] public string Type { get; set; } = "button";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool Small { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string VariantClass => Variant switch
+    {
+        "tonal" => "lv-btn-tonal",
+        "outlined" => "lv-btn-outlined",
+        "danger" => "lv-btn-danger",
+        _ => "lv-btn-filled"
+    };
+}

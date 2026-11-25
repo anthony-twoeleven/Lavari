@@ -1,0 +1,201 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject LavariBrowserApiClient Api
+@inject AppSessionState AppState
+@inject IFormattingService Formatting
+@inject NavigationManager Nav
+
+@if (!AppState.IsInitialized)
+{
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;gap:12px">
+        <span class="lv-spinner"></span>
+        <span>Loading Lavari...</span>
+    </div>
+}
+else if (!AppState.IsAuthenticated)
+{
+    <main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">
+        @Body
+    </main>
+}
+else
+{
+    <div class="lv-shell">
+        <nav class="lv-rail" aria-label="Primary navigation">
+            <div class="lv-brand">
+                <div class="lv-brand-title">LAVARI</div>
+                <div class="lv-brand-sub">Interior Design</div>
+            </div>
+
+            <NavLink class="lv-nav-link" href="" Match="NavLinkMatch.All">Dashboard</NavLink>
+            @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Read) || AppState.Can(ModuleKeys.Jobs, AccessLevel.Read))
+            {
+                <NavLink class="lv-nav-link" href="clients">Clients &amp; Jobs</NavLink>
+            }
+            @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Read))
+            {
+                <NavLink class="lv-nav-link" href="products">Product Catalog</NavLink>
+            }
+            @if (AppState.Can(ModuleKeys.ImageLibrary, AccessLevel.Read))
+            {
+                <NavLink class="lv-nav-link" href="images">Image Library</NavLink>
+            }
+            @if (AppState.Can(ModuleKeys.FinancialForecasting, AccessLevel.Read))
+            {
+                <NavLink class="lv-nav-link" href="forecasting">Forecasting</NavLink>
+            }
+            @if (AppState.Can(ModuleKeys.Users, AccessLevel.Read) || AppState.Can(ModuleKeys.RolesAndPermissions, AccessLevel.Read) || AppState.Can(ModuleKeys.ApplicationVariables, AccessLevel.Read))
+            {
+                <NavLink class="lv-nav-link" href="admin">Administration</NavLink>
+            }
+
+            <div style="margin-top:auto;padding-top:16px;border-top:1px solid var(--md-sys-color-outline-variant);font-size:0.8rem;color:var(--md-sys-color-on-surface-variant)">
+                <div><strong>@AppState.Session!.DisplayName</strong></div>
+                <div>@AppState.Session.Email</div>
+                <div style="margin-top:6px">
+                    <LvBadge Tone="primary">@(AppState.Session.IsFullAccess ? "Full Access" : string.Join(", ", AppState.Session.Roles))</LvBadge>
+                </div>
+                <div style="margin-top:10px">
+                    <LvButton Variant="outlined" Small="true" OnClick="SignOutAsync">Sign Out</LvButton>
+                </div>
+            </div>
+        </nav>
+
+        <div class="lv-main">
+            <header class="lv-topbar">
+                <div class="lv-row">
+                    @if (AppState.ActiveTimers.Count > 0)
+                    {
+                        @foreach (var t in AppState.ActiveTimers)
+                        {
+                            <a href="/jobs/@t.JobId" class="lv-badge @(t.State == "Running" ? "lv-badge-success" : "lv-badge-warning")">
+                                @(t.State == "Running" ? "● Running" : "❚❚ Paused"): @t.JobName (@Formatting.FormatDuration(t.LiveDurationSeconds))
+                            </a>
+                        }
+                    }
+                    else
+                    {
+                        <span style="font-size:0.84rem;color:var(--md-sys-color-on-surface-variant)">
+                            Local Zone: @(AppState.BrowserTimeZone ?? "Unavailable")
+                        </span>
+                    }
+                </div>
+
+                <div class="lv-row">
+                    <LvButton Variant="tonal" Small="true" OnClick="ToggleNotificationsAsync">
+                        Notifications (@AppState.Notifications.Count(n => !n.IsRead))
+                    </LvButton>
+                </div>
+            </header>
+
+            <main class="lv-content">
+                @Body
+            </main>
+        </div>
+    </div>
+
+    <LvDialog Open="_showNotifications" Title="In-App Notifications" OnClose="() => _showNotifications = false">
+        @if (AppState.Notifications.Count == 0)
+        {
+            <p>No notifications yet.</p>
+        }
+        else
+        {
+            <div style="display:flex;flex-direction:column;gap:10px">
+                @foreach (var n in AppState.Notifications)
+                {
+                    <div class="lv-card lv-card-tonal" style="padding:12px">
+                        <div class="lv-row" style="justify-content:space-between">
+                            <strong>@n.Title</strong>
+                            @if (!n.IsRead) { <LvBadge Tone="primary">New</LvBadge> }
+                        </div>
+                        <p style="margin:4px 0">@n.Message</p>
+                        <div class="lv-row">
+                            @if (n.RecordType == LockableRecordTypes.Job && n.RecordId.HasValue)
+                            {
+                                <a class="lv-btn lv-btn-filled lv-btn-sm" href="/jobs/@n.RecordId" @onclick="() => _showNotifications = false">Open Job</a>
+                            }
+                            @if (!n.IsRead)
+                            {
+                                <LvButton Variant="outlined" Small="true" OnClick="() => MarkReadAsync(n.Id)">Mark Read</LvButton>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </LvDialog>
+}
+
+@code {
+    private bool _showNotifications;
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += OnStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var tz = await Api.GetBrowserTimeZoneAsync();
+        var me = await Api.GetAsync<UserSessionDto>("/api/auth/me");
+        if (me.IsSuccess && me.Data is not null)
+        {
+            await Api.SetEditingSessionAsync(me.Data.EditingSessionId);
+            await Api.RefreshCsrfTokenAsync();
+            AppState.SetSession(me.Data, tz);
+            await RefreshHeaderDataAsync();
+        }
+        else
+        {
+            AppState.SetSession(null, tz);
+            if (!Nav.Uri.EndsWith("/login", StringComparison.OrdinalIgnoreCase))
+            {
+                Nav.NavigateTo("/login");
+            }
+        }
+    }
+
+    private async Task RefreshHeaderDataAsync()
+    {
+        var notifs = await Api.GetAsync<List<InAppNotificationDto>>("/api/notifications");
+        if (notifs.IsSuccess && notifs.Data is not null)
+        {
+            AppState.UpdateNotifications(notifs.Data);
+        }
+
+        if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Read))
+        {
+            var timers = await Api.GetAsync<List<TimeEntryDto>>("/api/time/active");
+            if (timers.IsSuccess && timers.Data is not null)
+            {
+                AppState.UpdateActiveTimers(timers.Data);
+            }
+        }
+    }
+
+    private async Task ToggleNotificationsAsync()
+    {
+        await RefreshHeaderDataAsync();
+        _showNotifications = !_showNotifications;
+    }
+
+    private async Task MarkReadAsync(Guid id)
+    {
+        await Api.PostAsync<object?>($"/api/notifications/{id}/read");
+        await RefreshHeaderDataAsync();
+    }
+
+    private async Task SignOutAsync()
+    {
+        await Api.PostAsync<object?>("/api/auth/logout");
+        AppState.Clear();
+        Nav.NavigateTo("/login");
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => AppState.Changed -= OnStateChanged;
+}

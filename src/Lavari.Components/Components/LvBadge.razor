@@ -1,0 +1,15 @@
+<span class="lv-badge @ToneClass">@ChildContent</span>
+
+@code {
+    [Parameter] public string Tone { get; set; } = "neutral"; // neutral, primary, success, warning, error
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string ToneClass => Tone switch
+    {
+        "primary" => "lv-badge-primary",
+        "success" => "lv-badge-success",
+        "warning" => "lv-badge-warning",
+        "error" => "lv-badge-error",
+        _ => string.Empty
+    };
+}
