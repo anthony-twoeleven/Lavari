@@ -24,3 +24,9 @@ public interface IPrivateFileStore
     Task<bool> ExistsAsync(string storageKey, CancellationToken ct = default);
     Task DeleteTemporaryAsync(string storageKey, CancellationToken ct = default);
 }
+
+public interface IRealtimeNotifier
+{
+    Task NotifyRecordChangedAsync(string moduleKey, string recordType, Guid recordId, string eventType, CancellationToken ct = default);
+    Task NotifyUserAsync(Guid userId, string category, string title, string message, string? recordType, Guid? recordId, CancellationToken ct = default);
+}

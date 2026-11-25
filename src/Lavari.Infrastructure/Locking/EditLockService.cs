@@ -9,12 +9,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lavari.Infrastructure.Locking;
 
-public interface IRealtimeNotifier
-{
-    Task NotifyRecordChangedAsync(string moduleKey, string recordType, Guid recordId, string eventType, CancellationToken ct = default);
-    Task NotifyUserAsync(Guid userId, string category, string title, string message, string? recordType, Guid? recordId, CancellationToken ct = default);
-}
-
 public sealed class NullRealtimeNotifier : IRealtimeNotifier
 {
     public Task NotifyRecordChangedAsync(string moduleKey, string recordType, Guid recordId, string eventType, CancellationToken ct = default)
