@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lavari.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lavari.Domain\Lavari.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Contracts\Lavari.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Application\Lavari.Application.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Infrastructure\Lavari.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

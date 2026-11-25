@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Lavari.UnitTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lavari.Domain\Lavari.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Contracts\Lavari.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Application\Lavari.Application.csproj" />
+    <ProjectReference Include="..\..\src\Lavari.Infrastructure\Lavari.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

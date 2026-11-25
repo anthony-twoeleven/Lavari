@@ -1,30 +1,32 @@
 # Lavari
 
-Starter repository for a .NET Blazor application. The application project has
-not been added yet.
+Lavari is an interior design business application for managing clients, jobs,
+product sourcing, mood boards, time tracking, forecasts, quotes, invoices and
+procurement.
 
 ## Prerequisites
 
-- [.NET SDK](https://dotnet.microsoft.com/download)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (LTS, matches
+  the installed SDK and allows open-source MIT/Apache-2.0 TickerQ 10.4.0 with
+  EF Core 10 SQLite)
 
-## Getting started
-
-Create a Blazor app under `src/Lavari`:
-
-```powershell
-dotnet new blazor -o src/Lavari
-```
-
-Run the app:
+## Running locally
 
 ```powershell
-dotnet run --project src/Lavari
+dotnet run --project src\Lavari.AppHost\Lavari.AppHost.csproj
 ```
 
-Follow the URL printed by the `dotnet run` command to open the app in a browser.
+## Design documents
+
+- [Application design](APPLICATION_DESIGN.md)
+- [Technical specification](TECHNICAL_SPEC.md)
+- [Agent rules](AGENTS.md)
 
 ## Repository contents
 
+- `src/` — Aspire AppHost, ServiceDefaults, Blazor Web host, API class library,
+  Material 3 Razor component library, Contracts, Application, Domain and
+  Infrastructure.
+- `tests/` — Unit tests, Integration tests and BenchmarkDotNet benchmarks.
 - `.gitignore` excludes generated .NET build output, IDE files, and other local
   artifacts.
-- `src/Lavari` will contain the Blazor application.

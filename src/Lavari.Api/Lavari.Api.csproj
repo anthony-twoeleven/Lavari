@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Lavari.Api</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Lavari.Application\Lavari.Application.csproj" />
+    <ProjectReference Include="..\Lavari.Contracts\Lavari.Contracts.csproj" />
+  </ItemGroup>
+</Project>

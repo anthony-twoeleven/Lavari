@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>Lavari.Web</RootNamespace>
+    <UserSecretsId>lavari-web-local-dev</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Lavari.ServiceDefaults\Lavari.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Lavari.Api\Lavari.Api.csproj" />
+    <ProjectReference Include="..\Lavari.Components\Lavari.Components.csproj" />
+    <ProjectReference Include="..\Lavari.Contracts\Lavari.Contracts.csproj" />
+    <ProjectReference Include="..\Lavari.Application\Lavari.Application.csproj" />
+    <ProjectReference Include="..\Lavari.Infrastructure\Lavari.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+  </ItemGroup>
+</Project>
