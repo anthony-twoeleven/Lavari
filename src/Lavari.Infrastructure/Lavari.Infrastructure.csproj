@@ -3,6 +3,9 @@
     <RootNamespace>Lavari.Infrastructure</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Lavari.IntegrationTests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Lavari.Application\Lavari.Application.csproj" />
     <ProjectReference Include="..\Lavari.Domain\Lavari.Domain.csproj" />
     <ProjectReference Include="..\Lavari.Contracts\Lavari.Contracts.csproj" />
