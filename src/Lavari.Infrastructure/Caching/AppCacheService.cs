@@ -50,21 +50,37 @@ public sealed class AppCacheService : IAppCacheService, IDisposable
         _cache = new MemoryCache(memOptions);
     }
 
-    public async Task<T> GetOrCreateAsync<T>(
+    public Task<T> GetOrCreateAsync<T>(
         CacheKey key,
         Func<CancellationToken, Task<T>> factory,
         CacheEntryPolicy? policy = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(key);
-        ArgumentNullException.ThrowIfNull(factory);
-
-        if (_cache.TryGetValue(key.Value, out T? existing) && existing is not null)
+        if (key is not null && factory is not null && _cache.TryGetValue(key.Value, out CachedValue? entry))
         {
-            Interlocked.Increment(ref _hits);
-            return existing;
+            if (entry is CachedValue<T> typed)
+            {
+                Interlocked.Increment(ref _hits);
+                return typed.Result;
+            }
+            if (entry?.Value is T compatible)
+            {
+                Interlocked.Increment(ref _hits);
+                return Task.FromResult(compatible);
+            }
         }
 
+        return FillAsync(key, factory, policy, cancellationToken);
+    }
+
+    private async Task<T> FillAsync<T>(
+        CacheKey? key,
+        Func<CancellationToken, Task<T>>? factory,
+        CacheEntryPolicy? policy,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(factory);
         Interlocked.Increment(ref _misses);
 
         // Capture generation tokens BEFORE calling the factory to fence stale in-flight fills.
@@ -121,10 +137,21 @@ public sealed class AppCacheService : IAppCacheService, IDisposable
         // Final fence check right before insert.
         if (!IsFenced(key, startGlobalGen, startKeyGen, startScopeGens))
         {
-            _cache.Set(key.Value, value, entryOptions);
+            _cache.Set(key.Value, new CachedValue<T>(value), entryOptions);
         }
 
         return value;
+    }
+
+    private abstract class CachedValue
+    {
+        public abstract object Value { get; }
+    }
+
+    private sealed class CachedValue<T>(T value) : CachedValue
+    {
+        public Task<T> Result { get; } = Task.FromResult(value);
+        public override object Value => Result.Result!;
     }
 
     public void Remove(CacheKey key)

@@ -32,8 +32,8 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
         byte[]? logoPngBytes,
         string? locale = null)
     {
-        using var ms = new MemoryStream();
-        using var pdf = SKDocument.CreatePdf(ms);
+        using var stream = new SKDynamicMemoryWStream();
+        using var pdf = SKDocument.CreatePdf(stream);
 
         // A4 Portrait in points (595 x 842)
         const float pageWidth = 595f;
@@ -41,11 +41,10 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
         const float margin = 42f;
         const float contentWidth = pageWidth - (margin * 2);
 
-        using var titleFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 20);
-        using var subTitleFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), 10);
-        using var headingFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 11);
-        using var bodyFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), 9.5f);
-        using var smallFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), 8.5f);
+        using var titleFont = new SKFont(Typefaces.Bold, 20);
+        using var headingFont = new SKFont(Typefaces.Bold, 11);
+        using var bodyFont = new SKFont(Typefaces.Normal, 9.5f);
+        using var smallFont = new SKFont(Typefaces.Normal, 8.5f);
 
         using var darkPaint = new SKPaint { Color = new SKColor(0x1F, 0x1B, 0x16), IsAntialias = true };
         using var mutedPaint = new SKPaint { Color = new SKColor(0x5E, 0x57, 0x4E), IsAntialias = true };
@@ -212,7 +211,8 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
 
         pdf.EndPage();
         pdf.Close();
-        return ms.ToArray();
+        using var data = stream.DetachAsData();
+        return data.ToArray();
     }
 
     public byte[] RenderMoodBoardPdf(
@@ -221,8 +221,8 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
         IReadOnlyDictionary<Guid, byte[]> imageBytesByAssetId,
         byte[]? logoPngBytes)
     {
-        using var ms = new MemoryStream();
-        using var pdf = SKDocument.CreatePdf(ms);
+        using var stream = new SKDynamicMemoryWStream();
+        using var pdf = SKDocument.CreatePdf(stream);
 
         // Landscape A4 in points (842 x 595) — one canvas per page, aspect-ratio preserved without cropping.
         const float pageWidth = 842f;
@@ -230,8 +230,8 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
         const float headerHeight = 46f;
         const float margin = 24f;
 
-        using var brandFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 14);
-        using var metaFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), 9.5f);
+        using var brandFont = new SKFont(Typefaces.Bold, 14);
+        using var metaFont = new SKFont(Typefaces.Normal, 9.5f);
 
         foreach (var c in canvases)
         {
@@ -298,7 +298,7 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
                 else if (el.ElementType == MoodBoardElementType.Text &&
                          !string.IsNullOrWhiteSpace(el.TextContent))
                 {
-                    using var textFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), Math.Max(7f, (float)(el.FontSizePx * scale)));
+                    using var textFont = new SKFont(Typefaces.Normal, Math.Max(7f, (float)(el.FontSizePx * scale)));
                     using var textPaint = new SKPaint { Color = ParseColor(el.TextColorHex, brandText), IsAntialias = true };
                     DrawLeft(pdfCanvas, el.TextContent, rect.Left + 4, rect.Top + textFont.Size + 4, textFont, textPaint);
                 }
@@ -308,7 +308,14 @@ public sealed class SkiaPdfRenderer : IPdfRenderer
         }
 
         pdf.Close();
-        return ms.ToArray();
+        using var data = stream.DetachAsData();
+        return data.ToArray();
+    }
+
+    private static class Typefaces
+    {
+        public static readonly SKTypeface Bold = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold);
+        public static readonly SKTypeface Normal = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal);
     }
 
     private static void DrawLeft(SKCanvas canvas, string text, float x, float y, SKFont font, SKPaint paint)

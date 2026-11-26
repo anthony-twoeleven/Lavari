@@ -37,7 +37,7 @@ public static class ImageResizePolicy
             maxH = SquareMaxSide;
         }
 
-        return FitWithinBox(width, height, maxW, maxH);
+        return FitValidatedDimensionsWithinBox(width, height, maxW, maxH);
     }
 
     public static ImageDimensions CalculateThumbnailSize(int width, int height, int maxSide = DefaultThumbnailMaxSide)
@@ -48,13 +48,17 @@ public static class ImageResizePolicy
             throw new ValidationServiceException("Invalid thumbnail dimension bound.", ErrorCodes.InvalidImageUpload);
         }
 
-        return FitWithinBox(width, height, maxSide, maxSide);
+        return FitValidatedDimensionsWithinBox(width, height, maxSide, maxSide);
     }
 
     public static ImageDimensions FitWithinBox(int width, int height, int maxWidth, int maxHeight)
     {
         ValidateInputDimensions(width, height);
+        return FitValidatedDimensionsWithinBox(width, height, maxWidth, maxHeight);
+    }
 
+    private static ImageDimensions FitValidatedDimensionsWithinBox(int width, int height, int maxWidth, int maxHeight)
+    {
         if (width <= maxWidth && height <= maxHeight)
         {
             return new ImageDimensions(width, height);

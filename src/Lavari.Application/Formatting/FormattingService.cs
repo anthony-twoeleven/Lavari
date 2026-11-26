@@ -10,6 +10,7 @@ namespace Lavari.Application.Formatting;
 public sealed class FormattingService : IFormattingService
 {
     private const string DefaultLocale = "en-AU";
+    private static readonly CultureInfo DefaultCulture = CultureInfo.GetCultureInfo(DefaultLocale);
 
     private static readonly Dictionary<string, string> CurrencySymbols = new(StringComparer.Ordinal)
     {
@@ -31,18 +32,13 @@ public sealed class FormattingService : IFormattingService
     public string FormatMoney(MoneyCents money, string? locale = null)
     {
         var culture = ResolveCulture(locale);
-        var humanAmount = money.ToHumanDecimal();
-        var absFormatted = Math.Abs(humanAmount).ToString("N2", culture);
+        var amount = Math.Abs(money.ToHumanDecimal());
         var sign = money.Cents < 0 ? "-" : string.Empty;
 
-        // For AUD in en-AU, render clean "$" or "A$" consistently with currency code clarity.
-        if (money.Currency == "AUD" && culture.Name.Equals("en-AU", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{sign}${absFormatted}";
-        }
-
-        var symbol = CurrencySymbols.TryGetValue(money.Currency, out var sym) ? sym : $"{money.Currency} ";
-        return $"{sign}{symbol}{absFormatted}";
+        var symbol = money.Currency == "AUD" && culture.Name.Equals(DefaultLocale, StringComparison.OrdinalIgnoreCase)
+            ? "$"
+            : CurrencySymbols.TryGetValue(money.Currency, out var sym) ? sym : $"{money.Currency} ";
+        return string.Create(culture, $"{sign}{symbol}{amount:N2}");
     }
 
     public MoneyCents ParseMoneyInput(string input, string currency, string? locale = null)
@@ -163,16 +159,22 @@ public sealed class FormattingService : IFormattingService
     {
         if (string.IsNullOrWhiteSpace(locale))
         {
-            return CultureInfo.GetCultureInfo(DefaultLocale);
+            return DefaultCulture;
+        }
+
+        var trimmed = locale.Trim();
+        if (trimmed.Equals(DefaultLocale, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultCulture;
         }
 
         try
         {
-            return CultureInfo.GetCultureInfo(locale.Trim());
+            return CultureInfo.GetCultureInfo(trimmed);
         }
         catch (CultureNotFoundException)
         {
-            return CultureInfo.GetCultureInfo(DefaultLocale);
+            return DefaultCulture;
         }
     }
 

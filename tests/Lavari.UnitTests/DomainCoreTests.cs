@@ -30,6 +30,18 @@ public sealed class DomainCoreTests
     }
 
     [Fact]
+    public void MoneyCents_RatioRoundsAcrossBothProductWidths()
+    {
+        Assert.Equal(-1, new MoneyCents(-5, "AUD").ApplyBasisPoints(1000).Cents);
+        Assert.Equal(0, new MoneyCents(-4, "AUD").ApplyBasisPoints(1000).Cents);
+        var maximum = new MoneyCents(MoneyCents.MaxSafeJsInteger, "AUD");
+        Assert.Equal(maximum, maximum.MultiplyByRatio(long.MaxValue, long.MaxValue));
+        Assert.Equal(maximum.Negate(), maximum.MultiplyByRatio(-long.MaxValue, long.MaxValue));
+        Assert.Equal(ErrorCodes.ArithmeticOverflow,
+            Assert.Throws<ValidationServiceException>(() => maximum.Add(new MoneyCents(1, "AUD"))).ErrorCode);
+    }
+
+    [Fact]
     public void MoneyCents_RejectsSubCentUnsupportedCurrencyAndMismatch()
     {
         var subCentEx = Assert.Throws<ValidationServiceException>(() => MoneyCents.FromExactDecimalInput(10.555m, "AUD"));

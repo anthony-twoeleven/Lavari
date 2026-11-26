@@ -68,9 +68,15 @@ public sealed class SkiaImageProcessingService : IImageProcessingService
                 ErrorCodes.InvalidImageUpload);
         }
 
-        using var oriented = ApplyOrientation(decoded, origin);
-        using var resized = ResizeBitmap(oriented, target.Width, target.Height);
-        using var thumbnail = ResizeBitmap(resized, thumbTarget.Width, thumbTarget.Height);
+        decoded.SetImmutable();
+        using var orientation = origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default
+            ? null
+            : ApplyOrientation(decoded, origin);
+        var oriented = orientation ?? decoded;
+        using var scaled = wasDownscaled ? ResizeBitmap(oriented, target.Width, target.Height) : null;
+        var resized = scaled ?? oriented;
+        using var scaledThumbnail = thumbTarget == target ? null : ResizeBitmap(resized, thumbTarget.Width, thumbTarget.Height);
+        var thumbnail = scaledThumbnail ?? resized;
 
         var (outFormat, contentType, extension, quality) = encodedFormat == SKEncodedImageFormat.Png
             ? (SKEncodedImageFormat.Png, "image/png", ".png", 100)
@@ -95,11 +101,6 @@ public sealed class SkiaImageProcessingService : IImageProcessingService
 
     private static SKBitmap ApplyOrientation(SKBitmap source, SKEncodedOrigin origin)
     {
-        if (origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default)
-        {
-            return source.Copy();
-        }
-
         var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
             or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
         var w = swap ? source.Height : source.Width;
@@ -141,22 +142,19 @@ public sealed class SkiaImageProcessingService : IImageProcessingService
         using var srcImg = SKImage.FromBitmap(source);
         canvas.DrawImage(srcImg, 0, 0, new SKSamplingOptions(SKFilterMode.Linear));
         canvas.Flush();
+        rotated.SetImmutable();
         return rotated;
     }
 
     private static SKBitmap ResizeBitmap(SKBitmap source, int targetW, int targetH)
     {
-        if (source.Width == targetW && source.Height == targetH)
-        {
-            return source.Copy();
-        }
-
         var resized = new SKBitmap(targetW, targetH, source.ColorType, source.AlphaType);
         var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
         using var canvas = new SKCanvas(resized);
         using var img = SKImage.FromBitmap(source);
         canvas.DrawImage(img, new SKRect(0, 0, targetW, targetH), sampling);
         canvas.Flush();
+        resized.SetImmutable();
         return resized;
     }
 

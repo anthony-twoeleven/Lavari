@@ -44,7 +44,7 @@ public sealed class ForecastingService : IForecastingService
         {
             jobQuery = jobQuery.Where(j => j.Id == request.JobId.Value);
         }
-        var jobs = await jobQuery.ToDictionaryAsync(j => j.Id, j => j, ct);
+        var jobs = await jobQuery.Select(j => new { j.Id, j.Name }).ToDictionaryAsync(j => j.Id, j => j.Name, ct);
         var jobIds = jobs.Keys.ToList();
 
         var sources = new List<ForecastSourceItemDto>();
@@ -55,21 +55,24 @@ public sealed class ForecastingService : IForecastingService
         var incompleteCount = 0;
 
         // 1. Issued invoices = Actual Revenue; Draft quotes NOT converted to an invoice = Planned Revenue (no double-counting!)
-        if (_permissions.Has(ModuleKeys.Invoices, AccessLevel.Read) || _permissions.Has(ModuleKeys.Quotes, AccessLevel.Read))
+        var canReadInvoices = _permissions.Has(ModuleKeys.Invoices, AccessLevel.Read);
+        var canReadQuotes = _permissions.Has(ModuleKeys.Quotes, AccessLevel.Read);
+        if (canReadInvoices || canReadQuotes)
         {
             var docs = await _db.FinancialDocuments.AsNoTracking()
                 .Where(d => jobIds.Contains(d.JobId) && d.Currency == currency && d.Status != "Void")
+                .Select(d => new { d.Id, d.JobId, d.DocumentType, d.DocumentNumber, d.Status, d.SourceQuoteId, EffectiveDate = d.IssueDate ?? d.DueDate, d.AppliedTotalCents })
                 .ToListAsync(ct);
 
             var convertedQuoteIds = docs.Where(d => d.SourceQuoteId.HasValue).Select(d => d.SourceQuoteId!.Value).ToHashSet();
 
             foreach (var doc in docs)
             {
-                if (doc.DocumentType == FinancialDocumentType.Quote && !_permissions.Has(ModuleKeys.Quotes, AccessLevel.Read)) continue;
-                if (doc.DocumentType == FinancialDocumentType.Invoice && !_permissions.Has(ModuleKeys.Invoices, AccessLevel.Read)) continue;
+                if (doc.DocumentType == FinancialDocumentType.Quote && !canReadQuotes) continue;
+                if (doc.DocumentType == FinancialDocumentType.Invoice && !canReadInvoices) continue;
                 if (doc.DocumentType == FinancialDocumentType.Quote && convertedQuoteIds.Contains(doc.Id)) continue; // Avoid double-counting quote + resulting invoice
 
-                var effDate = doc.IssueDate ?? doc.DueDate;
+                var effDate = doc.EffectiveDate;
                 if (effDate is null)
                 {
                     incompleteCount++;
@@ -87,7 +90,7 @@ public sealed class ForecastingService : IForecastingService
                 sources.Add(new ForecastSourceItemDto
                 {
                     JobId = doc.JobId,
-                    JobName = jobs[doc.JobId].Name,
+                    JobName = jobs[doc.JobId],
                     SourceType = doc.DocumentType == FinancialDocumentType.Quote ? ForecastSourceType.Quote : ForecastSourceType.Invoice,
                     SourceId = doc.Id,
                     Label = $"{doc.DocumentNumber} ({doc.Status})",
@@ -104,14 +107,19 @@ public sealed class ForecastingService : IForecastingService
         if (_permissions.Has(ModuleKeys.Procurement, AccessLevel.Read))
         {
             var procs = await _db.ProcurementItems.AsNoTracking()
-                .Include(p => p.Payments)
                 .Where(p => jobIds.Contains(p.JobId) && p.Currency == currency && p.Status != "Cancelled")
+                .Select(p => new
+                {
+                    p.Id, p.JobId, p.SupplierName, p.TotalCostCents, p.ExpectedDeliveryDate,
+                    Payments = p.Payments.Where(pay => pay.Status == "Paid")
+                        .Select(pay => new { pay.Id, pay.Description, pay.AmountCents, pay.PaidAtUtc, pay.DueDate }).ToList()
+                })
                 .ToListAsync(ct);
 
             foreach (var p in procs)
             {
                 long paidSum = 0;
-                foreach (var pay in p.Payments.Where(x => !x.IsDeleted && x.Status == "Paid"))
+                foreach (var pay in p.Payments)
                 {
                     paidSum += pay.AmountCents;
                     var payDate = pay.PaidAtUtc.HasValue
@@ -125,7 +133,7 @@ public sealed class ForecastingService : IForecastingService
                     sources.Add(new ForecastSourceItemDto
                     {
                         JobId = p.JobId,
-                        JobName = jobs[p.JobId].Name,
+                        JobName = jobs[p.JobId],
                         SourceType = ForecastSourceType.Procurement,
                         SourceId = pay.Id,
                         Label = $"{p.SupplierName} — {pay.Description}",
@@ -149,7 +157,7 @@ public sealed class ForecastingService : IForecastingService
                         sources.Add(new ForecastSourceItemDto
                         {
                             JobId = p.JobId,
-                            JobName = jobs[p.JobId].Name,
+                            JobName = jobs[p.JobId],
                             SourceType = ForecastSourceType.Procurement,
                             SourceId = p.Id,
                             Label = $"{p.SupplierName} (Outstanding balance)",
@@ -173,6 +181,7 @@ public sealed class ForecastingService : IForecastingService
                             d.ForecastCurrency == currency &&
                             d.LinkedEntityId == null &&
                             d.Status != "Cancelled")
+                .Select(d => new { d.Id, d.JobId, d.Label, d.CalendarDate, d.OccurredAtUtc, d.ForecastAmountCents, d.ForecastDirection, d.IsActual })
                 .ToListAsync(ct);
 
             foreach (var d in dates)
@@ -198,7 +207,7 @@ public sealed class ForecastingService : IForecastingService
                 sources.Add(new ForecastSourceItemDto
                 {
                     JobId = d.JobId,
-                    JobName = jobs[d.JobId].Name,
+                    JobName = jobs[d.JobId],
                     SourceType = ForecastSourceType.Milestone,
                     SourceId = d.Id,
                     Label = d.Label,

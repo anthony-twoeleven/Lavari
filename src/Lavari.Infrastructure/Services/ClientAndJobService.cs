@@ -351,8 +351,14 @@ public sealed class ClientAndJobService : IClientAndJobService
         var total = await query.CountAsync(ct);
         var page = request.NormalizedPage;
         var pageSize = request.NormalizedPageSize;
+        var offset = (long)(page - 1) * pageSize;
+        if (offset >= total)
+        {
+            return new PagedResult<JobDto> { Items = [], TotalCount = total, Page = page, PageSize = pageSize };
+        }
+
         var items = await query.OrderByDescending(j => j.UpdatedAtUtc)
-            .Skip((page - 1) * pageSize)
+            .Skip((int)offset)
             .Take(pageSize)
             .Select(j => new JobDto
             {

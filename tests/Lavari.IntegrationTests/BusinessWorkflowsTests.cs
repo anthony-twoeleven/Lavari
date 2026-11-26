@@ -77,6 +77,21 @@ public sealed class BusinessWorkflowsTests : IDisposable
     }
 
     [Fact]
+    public async Task JobSearch_BeyondLastPageReturnsEmptyWithoutOffsetOverflow()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Coastal Builders" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Display Homes" });
+        await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest { JobGroupId = group.Id, Name = "Job Alpha", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD" });
+
+        var result = await h.ClientsJobs.ListJobsAsync(client.Id, group.Id,
+            new PagedRequest { Page = int.MaxValue, PageSize = 25, Search = "alpha" });
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal(int.MaxValue, result.Page);
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
     public async Task TimeTracking_CancelDeleteStopAtResumeAtAndMultiTimerModal_WorkEndToEnd()
     {
         await using var h = await CreateHarnessAsync();

@@ -96,7 +96,7 @@ public static class PermissionRegistry
     ];
 
     public static bool IsRegistered(string? moduleKey)
-        => !string.IsNullOrWhiteSpace(moduleKey) && ModuleKeys.All.Contains(moduleKey);
+        => moduleKey is not null && ModuleKeys.All.Contains(moduleKey);
 
     public static FrozenDictionary<string, AccessLevel> ComputeEffectiveGrants(
         bool isActiveUser,

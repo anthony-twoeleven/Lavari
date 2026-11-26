@@ -20,7 +20,11 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
     public long Cents { get; }
     public string Currency { get; }
 
-    public MoneyCents(long cents, string currency)
+    public MoneyCents(long cents, string currency) : this(currency, cents, validateCurrency: true)
+    {
+    }
+
+    private MoneyCents(string currency, long cents, bool validateCurrency = false)
     {
         if (cents is > MaxSafeJsInteger or < MinSafeJsInteger)
         {
@@ -30,7 +34,7 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
                 "Enter a smaller monetary value.");
         }
 
-        Currency = NormalizeAndValidateCurrency(currency);
+        Currency = validateCurrency || currency is null ? NormalizeAndValidateCurrency(currency) : currency;
         Cents = cents;
     }
 
@@ -38,6 +42,11 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
 
     public static string NormalizeAndValidateCurrency(string? currency)
     {
+        if (currency is { Length: 3 } && SupportedTwoDecimalCurrencies.Contains(currency))
+        {
+            return currency;
+        }
+
         if (string.IsNullOrWhiteSpace(currency))
         {
             throw new ValidationServiceException(
@@ -84,7 +93,7 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
         EnsureSameCurrency(other);
         try
         {
-            return new MoneyCents(checked(Cents + other.Cents), Currency);
+            return new MoneyCents(Currency, checked(Cents + other.Cents));
         }
         catch (OverflowException)
         {
@@ -99,7 +108,7 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
         EnsureSameCurrency(other);
         try
         {
-            return new MoneyCents(checked(Cents - other.Cents), Currency);
+            return new MoneyCents(Currency, checked(Cents - other.Cents));
         }
         catch (OverflowException)
         {
@@ -113,7 +122,7 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
     {
         try
         {
-            return new MoneyCents(checked(-Cents), Currency);
+            return new MoneyCents(Currency, checked(-Cents));
         }
         catch (OverflowException)
         {
@@ -133,23 +142,37 @@ public readonly record struct MoneyCents : IComparable<MoneyCents>
         }
 
         Int128 product = (Int128)Cents * numerator;
-        Int128 quotient = product / denominator;
-        Int128 remainder = product % denominator;
-        Int128 absTwiceRemainder = Int128.Abs(remainder) * 2;
+        if (product >= long.MinValue && product <= long.MaxValue)
+        {
+            var (q, r) = Math.DivRem((long)product, denominator);
+            var absRemainder = Math.Abs(r);
+            if (absRemainder >= denominator - absRemainder)
+            {
+                q += r >= 0 ? 1 : -1;
+            }
 
-        if (absTwiceRemainder >= denominator)
+            return CreateRatioResult(q);
+        }
+
+        var (quotient, remainder) = Int128.DivRem(product, denominator);
+        if (Int128.Abs(remainder) * 2 >= denominator)
         {
             quotient += product >= 0 ? 1 : -1;
         }
 
-        if (quotient > MaxSafeJsInteger || quotient < MinSafeJsInteger)
+        return CreateRatioResult(quotient);
+    }
+
+    private MoneyCents CreateRatioResult(Int128 result)
+    {
+        if (result > MaxSafeJsInteger || result < MinSafeJsInteger)
         {
             throw new ValidationServiceException(
                 "Monetary calculation exceeded the supported range.",
                 ErrorCodes.ArithmeticOverflow);
         }
 
-        return new MoneyCents((long)quotient, Currency);
+        return new MoneyCents(Currency, (long)result);
     }
 
     public MoneyCents ApplyBasisPoints(int basisPoints) => MultiplyByRatio(basisPoints, 10_000L);

@@ -18,6 +18,21 @@ dependency until the scheduler decision is resolved.
 dotnet run --project src\Lavari.AppHost\Lavari.AppHost.csproj
 ```
 
+## Performance benchmarks
+
+Run the full suite in Release to measure execution time and managed allocations:
+
+```powershell
+dotnet run --project tests\Lavari.Benchmarks\Lavari.Benchmarks.csproj -c Release -- --filter '*' --exporters markdown csv
+```
+
+For comparison with the .NET 11 performance sweep, use BenchmarkDotNet
+`0.16.0-preview.2` as a temporary local override in `Directory.Packages.props`:
+the pinned stable `0.15.8` does not recognize .NET 11. Restore the stable pin
+afterward. Compare results with the same runner, runtime, and input data.
+The 25-job search requests page 2 and measures an empty page; the 100-job
+search measures a populated page.
+
 ## Design documents
 
 - [Application design](APPLICATION_DESIGN.md)
