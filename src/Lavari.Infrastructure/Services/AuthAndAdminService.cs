@@ -130,9 +130,9 @@ public sealed class AccountAppearanceService(
     {
         permissions.Require(ModuleKeys.AccountAppearance, AccessLevel.Alter);
         if (request.Mode is not ("system" or "light" or "dark") ||
-            request.Color is not ("lavender" or "blue" or "green" or "rose"))
+            request.Color is not ("purple" or "blue" or "green" or "coral" or "neutral" or "lavender" or "rose"))
         {
-            throw new ValidationServiceException("Choose a supported appearance and highlight color.");
+            throw new ValidationServiceException("Choose a supported theme and color palette.");
         }
 
         var user = await CurrentUserAsync(ct);
@@ -157,7 +157,12 @@ public sealed class AccountAppearanceService(
     private static AppearanceDto Map(UserEntity user) => new()
     {
         Mode = user.AppearanceMode,
-        Color = user.AppearanceColor,
+        Color = user.AppearanceColor switch
+        {
+            "lavender" => "purple",
+            "rose" => "coral",
+            _ => user.AppearanceColor
+        },
         ConcurrencyToken = user.ConcurrencyToken
     };
 }

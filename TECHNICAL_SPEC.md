@@ -70,6 +70,10 @@ token on cookie-authenticated state-changing requests and validate origin as
 applicable. Requests still pass through authentication, authorization and
 validation when the API shares a process with the UI. API-dependent UI must
 wait until interactivity is available; configure prerendering accordingly.
+Await JavaScript interop inside a try/catch. UI-only operations may stop when
+the circuit disconnects, but never treat a missing confirmation as consent.
+Browser API interop failures must propagate rather than masquerade as HTTP
+responses or successful operations. Log the operation name, not its arguments.
 Revalidate the identity for long-lived interactive sessions.
 
 A future separate API host reuses the same endpoint library and application
@@ -1363,9 +1367,10 @@ incrementally as needed rather than attempting to recreate all of Material 3.
 
 Use `prefers-color-scheme` and respond to preference changes for light and
 dark tokens; maintain contrast and accessibility in both themes. Account
-appearance settings offer System, Light and Dark modes and curated highlight
-swatches, with coordinated light and dark semantic palettes. Store settings
-per user, default to System and lavender, and require the registered account
+appearance settings offer System, Light and Dark modes and static Purple,
+Green, Coral, Blue and Neutral palettes with coordinated primary, secondary,
+tertiary and surface roles in both themes. Store settings per user, default to
+System and Purple, and require the registered account
 appearance Read/Alter permission for self-service reads/updates. Persist and
 audit updates with optimistic concurrency; never use this grant to edit
 another user's profile or permissions. Preview is local until saved, and

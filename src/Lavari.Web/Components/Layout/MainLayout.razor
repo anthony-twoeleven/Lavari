@@ -121,8 +121,14 @@ else
     private ApiErrorResponse? _appearanceError;
     private ElementReference _mobileMenu;
 
-    private Task OpenMenuAsync() => JS.InvokeVoidAsync("lavariInterop.openDialog", _mobileMenu).AsTask();
-    private Task CloseMenuAsync() => JS.InvokeVoidAsync("lavariInterop.closeDialog", _mobileMenu).AsTask();
+    private Task OpenMenuAsync() => InvokeMenuAsync("lavariInterop.openDialog");
+    private Task CloseMenuAsync() => InvokeMenuAsync("lavariInterop.closeDialog");
+
+    private async Task InvokeMenuAsync(string identifier)
+    {
+        try { await JS.InvokeVoidAsync(identifier, _mobileMenu); }
+        catch (JSDisconnectedException) { }
+    }
 
     protected override void OnInitialized()
     {

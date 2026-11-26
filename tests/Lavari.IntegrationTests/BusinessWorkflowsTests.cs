@@ -1,7 +1,9 @@
+using System.Data.Common;
 using System.Text;
 using DocumentFormat.OpenXml.Packaging;
 using Lavari.Application.Abstractions;
 using Lavari.Application.Formatting;
+using Lavari.Application.Locking;
 using Lavari.Application.Security;
 using Lavari.Contracts.Business;
 using Lavari.Contracts.Common;
@@ -13,11 +15,13 @@ using Lavari.Infrastructure.Documents;
 using Lavari.Infrastructure.Locking;
 using Lavari.Infrastructure.Media;
 using Lavari.Infrastructure.Persistence;
+using Lavari.Infrastructure.Persistence.Entities;
 using Lavari.Infrastructure.Security;
 using Lavari.Infrastructure.Services;
 using Lavari.Infrastructure.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
@@ -40,9 +44,11 @@ public sealed class BusinessWorkflowsTests : IDisposable
         Directory.CreateDirectory(_tempDir);
     }
 
-    private async Task<TestHarness> CreateHarnessAsync()
+    private async Task<TestHarness> CreateHarnessAsync(IInterceptor? interceptor = null)
     {
-        var opts = new DbContextOptionsBuilder<LavariDbContext>().UseSqlite(_connection).Options;
+        var options = new DbContextOptionsBuilder<LavariDbContext>().UseSqlite(_connection);
+        if (interceptor is not null) options.AddInterceptors(interceptor);
+        var opts = options.Options;
         var ids = new TimeOrderedIdGenerator(_time);
         var db = new LavariDbContext(opts, _time, _actor, ids);
         await db.Database.MigrateAsync();
@@ -69,7 +75,7 @@ public sealed class BusinessWorkflowsTests : IDisposable
         var clientsJobs = new ClientAndJobService(db, _actor, perms, locks, cache, _time, ids, new NullRealtimeNotifier());
         var timeSvc = new TimeTrackingService(db, _actor, perms, _time, ids);
         var images = new ImageLibraryService(db, _actor, perms, imgProc, fileStore, _time, ids);
-        var moodBoards = new MoodBoardService(db, _actor, perms, admin, fileStore, pdfRenderer, _time, ids);
+        var moodBoards = new MoodBoardService(db, _actor, perms, admin, fileStore, images, pdfRenderer, _time, ids);
         var finance = new FinancialDocumentService(db, _actor, perms, locks, admin, formatting, wordSvc, pdfRenderer, fileStore, images, _time, ids);
         var forecast = new ForecastingService(db, perms);
 
@@ -89,6 +95,32 @@ public sealed class BusinessWorkflowsTests : IDisposable
         Assert.Equal(1, result.TotalCount);
         Assert.Equal(int.MaxValue, result.Page);
         Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task LineItemCreate_RollsBackIfLeaseExpiresBeforeCommit()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Lease client" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Lease group" });
+        var job = await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest
+        {
+            JobGroupId = group.Id, Name = "Lease job", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD"
+        });
+        var lease = await h.Locks.RequestModifyAsync(LockableRecordType.Job, job.Id);
+        var advancingLocks = new ExpiringLock(h.Locks, _time);
+        var service = new ProductAndLineItemService(h.Db, _actor, new PermissionEvaluator(_actor),
+            advancingLocks, h.Cache, _time, new TimeOrderedIdGenerator(_time));
+        var error = await Assert.ThrowsAsync<ConflictServiceException>(() => service.AddJobLineItemAsync(job.Id,
+            new UpsertJobLineItemRequest
+            {
+                ClientId = client.Id, Title = "Must roll back", Currency = "AUD",
+                LeaseId = lease.LeaseId, FencingVersion = lease.FencingVersion
+            }));
+        Assert.Equal(ErrorCodes.EditLockExpired, error.ErrorCode);
+        h.Db.ChangeTracker.Clear();
+        Assert.False(await h.Db.JobLineItems.AnyAsync(i => i.Title == "Must roll back"));
+        Assert.False(await h.Db.AuditEntries.AnyAsync(a => a.EntityType == "JobLineItemEntity"));
     }
 
     [Fact]
@@ -188,6 +220,217 @@ public sealed class BusinessWorkflowsTests : IDisposable
         Assert.Equal("Cancelled", deletedB.State);
         await h.Time.RestoreAsync(deletedB.Id, deletedB.ConcurrencyToken);
         Assert.Empty(await h.Time.ListActiveTimersForCurrentUserAsync());
+    }
+
+    [Fact]
+    public async Task ImageUpload_PostCommitReadFailurePreservesCommittedFiles()
+    {
+        var interceptor = new FailImageReadInterceptor();
+        await using var h = await CreateHarnessAsync(interceptor);
+        interceptor.Enabled = true;
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            h.Images.UploadAsync("Committed image", null, null, true, true, null, null, null, null, bytes, "image/png"));
+
+        var asset = await h.Db.ImageAssets.AsNoTracking().SingleAsync(i => i.Title == "Committed image");
+        Assert.NotEmpty((await h.Images.ReadImageBytesAsync(asset.Id, false)).Bytes);
+        Assert.NotEmpty((await h.Images.ReadImageBytesAsync(asset.Id, true)).Bytes);
+        Assert.True(await h.Db.AuditEntries.AnyAsync(a => a.EntityType == nameof(ImageAssetEntity) && a.EntityId == asset.Id.ToString("D")));
+    }
+
+    [Fact]
+    public async Task ImageUpload_UncertainCommitPreservesReferencedFiles()
+    {
+        var interceptor = new FailAfterCommitInterceptor();
+        await using var h = await CreateHarnessAsync(interceptor);
+        interceptor.Enabled = true;
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            h.Images.UploadAsync("Uncertain image", null, null, true, true, null, null, null, null, bytes, "image/png"));
+
+        h.Db.ChangeTracker.Clear();
+        var asset = await h.Db.ImageAssets.AsNoTracking().SingleAsync(i => i.Title == "Uncertain image");
+        Assert.NotEmpty((await h.Images.ReadImageBytesAsync(asset.Id, false)).Bytes);
+        Assert.NotEmpty((await h.Images.ReadImageBytesAsync(asset.Id, true)).Bytes);
+    }
+
+    [Fact]
+    public async Task ImageReads_FilterJobImagesAndRecheckActiveHierarchy()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Private client" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Group" });
+        var job = await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest
+        {
+            JobGroupId = group.Id, Name = "Private job", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD"
+        });
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+        var publicImage = await h.Images.UploadAsync("Global", null, null, true, true, null, null, null, null, bytes, "image/png");
+        var jobImage = await h.Images.UploadAsync("Job image", null, null, true, false, client.Id, job.Id, null, null, bytes, "image/png");
+        await h.Images.UploadAsync("Private orphan", null, null, true, false, null, null, null, null, bytes, "image/png");
+        var derivedId = Guid.NewGuid();
+        h.Db.ImageAssets.Add(new ImageAssetEntity
+        {
+            Id = derivedId, Title = "Derived", StorageKey = "future-derived", ThumbnailStorageKey = "future-derived-thumb",
+            AiSourceImageAssetId = publicImage.Id, IsGlobalLibrary = true
+        });
+        await h.Db.SaveChangesAsync();
+        var actor = new LimitedActor(Guid.NewGuid(), ModuleKeys.ImageLibrary);
+        var images = CreateImageReader(h, actor);
+
+        var visible = await images.ListAsync(new ImageLibraryFilterRequest());
+        Assert.Equal(1, visible.TotalCount);
+        Assert.Equal(publicImage.Id, Assert.Single(visible.Items).Id);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(derivedId, false));
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(jobImage.Id, false));
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(jobImage.Id, true));
+        await Assert.ThrowsAsync<ConflictServiceException>(() => h.Images.SoftDeleteAsync(publicImage.Id, publicImage.ConcurrencyToken));
+        actor.GrantDelete(ModuleKeys.ImageLibrary);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.SoftDeleteAsync(jobImage.Id, jobImage.ConcurrencyToken));
+
+        actor.Grant(ModuleKeys.Clients, ModuleKeys.Jobs);
+        Assert.Equal(2, (await images.ListAsync(new ImageLibraryFilterRequest())).TotalCount);
+        Assert.NotEmpty((await images.ReadImageBytesAsync(jobImage.Id, false)).Bytes);
+        Assert.NotEmpty((await images.ReadImageBytesAsync(jobImage.Id, true)).Bytes);
+
+        actor.Revoke(ModuleKeys.Jobs);
+        Assert.Equal(1, (await images.ListAsync(new ImageLibraryFilterRequest())).TotalCount);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(jobImage.Id, false));
+        actor.Grant(ModuleKeys.Jobs);
+        var storedClient = await h.Db.Clients.SingleAsync(c => c.Id == client.Id);
+        storedClient.DeletedAtUtc = _time.GetUtcNow();
+        await h.Db.SaveChangesAsync();
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(jobImage.Id, false));
+    }
+
+    [Fact]
+    public async Task ImageRestore_RequiresActiveAssociationPermissions()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Client" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Group" });
+        var job = await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest
+        {
+            JobGroupId = group.Id, Name = "Job", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD"
+        });
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+        var image = await h.Images.UploadAsync("Linked", null, null, true, true, client.Id, job.Id, null, null, bytes, "image/png");
+        await h.Images.SoftDeleteAsync(image.Id, image.ConcurrencyToken);
+        var deleted = await h.Db.ImageAssets.IgnoreQueryFilters().SingleAsync(i => i.Id == image.Id);
+        var actor = new LimitedActor(Guid.NewGuid());
+        actor.GrantDelete(ModuleKeys.ImageLibrary);
+        var images = CreateImageReader(h, actor);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.RestoreAsync(image.Id, deleted.ConcurrencyToken));
+        actor.Grant(ModuleKeys.Clients, ModuleKeys.Jobs);
+        await images.RestoreAsync(image.Id, deleted.ConcurrencyToken);
+
+        var restored = await h.Db.ImageAssets.SingleAsync(i => i.Id == image.Id);
+        await h.Images.SoftDeleteAsync(image.Id, restored.ConcurrencyToken);
+        var association = await h.Db.ImageAssociations.SingleAsync(a => a.ImageAssetId == image.Id);
+        association.DeletedAtUtc = _time.GetUtcNow();
+        await h.Db.SaveChangesAsync();
+        actor.Revoke(ModuleKeys.Jobs);
+        actor.Revoke(ModuleKeys.Clients);
+        deleted = await h.Db.ImageAssets.IgnoreQueryFilters().SingleAsync(i => i.Id == image.Id);
+        await images.RestoreAsync(image.Id, deleted.ConcurrencyToken);
+        Assert.NotEmpty((await images.ReadImageBytesAsync(image.Id, false)).Bytes);
+    }
+
+    [Fact]
+    public async Task ImageWrites_RequireAccessToSourceAndConsistentRelatedRecords()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Client" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Group" });
+        var job = await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest
+        {
+            JobGroupId = group.Id, Name = "Job", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD"
+        });
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+        var jobImage = await h.Images.UploadAsync("Job image", null, null, true, false, client.Id, job.Id, null, null, bytes, "image/png");
+        var actor = new LimitedActor(Guid.NewGuid());
+        actor.GrantAlter(ModuleKeys.ImageLibrary);
+        actor.Grant(ModuleKeys.Jobs);
+        var images = CreateImageReader(h, actor);
+        await Assert.ThrowsAsync<ForbiddenServiceException>(() =>
+            images.UploadAsync("New", null, null, true, false, null, job.Id, null, null, bytes, "image/png"));
+        await Assert.ThrowsAsync<NotFoundServiceException>(() =>
+            images.AddAssociationAsync(jobImage.Id, null, null, null, ImageAssociationType.Library));
+
+        actor.Grant(ModuleKeys.Clients);
+        await Assert.ThrowsAsync<ValidationServiceException>(() =>
+            images.UploadAsync("New", null, null, true, false, Guid.NewGuid(), job.Id, null, null, bytes, "image/png"));
+        await Assert.ThrowsAsync<ForbiddenServiceException>(() =>
+            images.AddAssociationAsync(jobImage.Id, null, null, Guid.NewGuid(), ImageAssociationType.Product));
+        actor.Grant(ModuleKeys.ProductCatalog);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() =>
+            images.AddAssociationAsync(jobImage.Id, null, null, Guid.NewGuid(), ImageAssociationType.Product));
+    }
+
+    [Fact]
+    public async Task ImageReads_RequirePermissionsForDirectReferencesAndBoardExport()
+    {
+        await using var h = await CreateHarnessAsync();
+        var client = await h.ClientsJobs.CreateClientAsync(new UpsertClientRequest { Name = "Client" });
+        var group = await h.ClientsJobs.CreateJobGroupAsync(new UpsertJobGroupRequest { ClientId = client.Id, Name = "Group" });
+        var job = await h.ClientsJobs.CreateJobAsync(new UpsertJobRequest
+        {
+            JobGroupId = group.Id, Name = "Job", Status = "Active", TimeZoneIana = "Australia/Sydney", DefaultCurrency = "AUD"
+        });
+        var bytes = CreateSyntheticImage(20, 20, SKEncodedImageFormat.Png);
+        var image = await h.Images.UploadAsync("Linked", null, null, true, true, null, null, null, null, bytes, "image/png");
+        h.Db.Products.Add(new ProductEntity { Id = Guid.NewGuid(), Name = "Linked product", PrimaryImageAssetId = image.Id });
+        h.Db.Receipts.Add(new ReceiptEntity
+        {
+            Id = Guid.NewGuid(), JobId = job.Id, ImageAssetId = image.Id, MerchantName = "Merchant",
+            ReceiptDate = new DateOnly(2026, 11, 25), UploadedByUserId = _actor.ActorId!.Value
+        });
+        await h.Db.SaveChangesAsync();
+        var board = await h.MoodBoards.CreateBoardAsync(job.Id, new UpsertMoodBoardRequest { Name = "Board" });
+        var canvas = board.Canvases[0];
+        await h.MoodBoards.SaveCanvasElementsAsync(canvas.Id, new SaveCanvasElementsRequest
+        {
+            ConcurrencyToken = canvas.ConcurrencyToken,
+            Elements = [new MoodBoardElementDto
+            {
+                Id = Guid.Empty, ElementType = MoodBoardElementType.Image, ImageAssetId = image.Id,
+                FontSizePx = 16, TextColorHex = "#000000", X = 0, Y = 0, Width = 100, Height = 100, ZIndex = 0
+            }]
+        });
+
+        var actor = new LimitedActor(_actor.ActorId!.Value, ModuleKeys.ImageLibrary, ModuleKeys.Clients, ModuleKeys.Jobs);
+        var images = CreateImageReader(h, actor);
+        Assert.Equal(0, (await images.ListAsync(new ImageLibraryFilterRequest())).TotalCount);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(image.Id, false));
+        actor.Grant(ModuleKeys.ProductCatalog);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(image.Id, false));
+        actor.Grant(ModuleKeys.Receipts);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => images.ReadImageBytesAsync(image.Id, false));
+        actor.Grant(ModuleKeys.MoodBoards);
+        Assert.Single((await images.ListAsync(new ImageLibraryFilterRequest())).Items);
+        Assert.NotEmpty((await images.ReadImageBytesAsync(image.Id, false)).Bytes);
+        actor.Revoke(ModuleKeys.ImageLibrary);
+        await Assert.ThrowsAsync<ForbiddenServiceException>(() => images.ReadImageBytesAsync(image.Id, false));
+        actor.Grant(ModuleKeys.ImageLibrary);
+
+        actor.Revoke(ModuleKeys.Receipts);
+        var ids = new TimeOrderedIdGenerator(_time);
+        var store = new LocalPrivateFileStore(Options.Create(new LavariStorageOptions { StorageRoot = _tempDir }), ids, _time);
+        var permissions = new PermissionEvaluator(actor);
+        var admin = new AdminService(h.Db, actor, permissions, new Pbkdf2PasswordHasher(), h.Cache, _time, ids);
+        var boards = new MoodBoardService(h.Db, actor, permissions, admin, store, images,
+            new SkiaPdfRenderer(new FormattingService()), _time, ids);
+        await Assert.ThrowsAsync<NotFoundServiceException>(() => boards.SaveAsPdfAsync(board.Id, null));
+    }
+
+    private ImageLibraryService CreateImageReader(TestHarness h, LimitedActor actor)
+    {
+        var ids = new TimeOrderedIdGenerator(_time);
+        return new ImageLibraryService(h.Db, actor, new PermissionEvaluator(actor), new SkiaImageProcessingService(),
+            new LocalPrivateFileStore(Options.Create(new LavariStorageOptions { StorageRoot = _tempDir }), ids, _time),
+            _time, ids);
     }
 
     [Fact]
@@ -406,11 +649,100 @@ public sealed class BusinessWorkflowsTests : IDisposable
         }
     }
 
+    private sealed class FailAfterCommitInterceptor : DbTransactionInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            if (Enabled)
+            {
+                Enabled = false;
+                throw new InvalidOperationException("Simulated failure after commit.");
+            }
+            return base.TransactionCommittedAsync(transaction, eventData, cancellationToken);
+        }
+    }
+
+    private sealed class FailImageReadInterceptor : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled && command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                command.CommandText.Contains("FROM \"ImageAssets\"", StringComparison.Ordinal))
+            {
+                Enabled = false;
+                throw new InvalidOperationException("Simulated image read failure.");
+            }
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
     private sealed class TestTime(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan delta) => _now = _now.Add(delta);
+    }
+
+    private sealed class ExpiringLock(IEditLockService inner, TestTime time) : IEditLockService
+    {
+        private int _checks;
+        public async Task EnsureActiveLeaseHeldAsync(LockableRecordType type, Guid id, Guid? leaseId, long? fence, CancellationToken ct = default)
+        {
+            if (++_checks == 2) time.Advance(TimeSpan.FromMinutes(6));
+            await inner.EnsureActiveLeaseHeldAsync(type, id, leaseId, fence, ct);
+        }
+        public Task<EditLockStatusDto> GetStatusAsync(LockableRecordType type, Guid id, CancellationToken ct = default) => inner.GetStatusAsync(type, id, ct);
+        public Task<EditLockStatusDto> RequestModifyAsync(LockableRecordType type, Guid id, CancellationToken ct = default) => inner.RequestModifyAsync(type, id, ct);
+        public Task<EditLockStatusDto> ClaimReservationAsync(LockableRecordType type, Guid id, CancellationToken ct = default) => inner.ClaimReservationAsync(type, id, ct);
+        public Task<EditLockStatusDto> RenewLeaseAsync(LockableRecordType type, Guid id, Guid lease, long fence, CancellationToken ct = default) => inner.RenewLeaseAsync(type, id, lease, fence, ct);
+        public Task<EditLockStatusDto> ReleaseLeaseAsync(LockableRecordType type, Guid id, Guid? lease = null, long? fence = null, CancellationToken ct = default) => inner.ReleaseLeaseAsync(type, id, lease, fence, ct);
+        public Task<EditLockStatusDto> CancelQueueEntryAsync(LockableRecordType type, Guid id, CancellationToken ct = default) => inner.CancelQueueEntryAsync(type, id, ct);
+        public Task<int> SweepExpiredLeasesAsync(CancellationToken ct = default) => inner.SweepExpiredLeasesAsync(ct);
+        public Task<IReadOnlyList<InAppNotificationDto>> GetNotificationsAsync(bool unreadOnly = false, CancellationToken ct = default) => inner.GetNotificationsAsync(unreadOnly, ct);
+        public Task MarkNotificationReadAsync(Guid id, CancellationToken ct = default) => inner.MarkNotificationReadAsync(id, ct);
+    }
+
+    private sealed class LimitedActor : ICurrentActorContext
+    {
+        private readonly Dictionary<string, AccessLevel> _grants = new(StringComparer.Ordinal);
+
+        public LimitedActor(Guid id, params string[] modules)
+        {
+            ActorId = id;
+            Grant(modules);
+        }
+
+        public void Grant(params string[] modules)
+        {
+            foreach (var module in modules) _grants[module] = AccessLevel.Read;
+        }
+
+        public void GrantAlter(params string[] modules)
+        {
+            foreach (var module in modules) _grants[module] = AccessLevel.Alter;
+        }
+
+        public void GrantDelete(params string[] modules)
+        {
+            foreach (var module in modules) _grants[module] = AccessLevel.Delete;
+        }
+
+        public void Revoke(string module) => _grants.Remove(module);
+        public bool IsAuthenticated => true;
+        public bool IsSystemPrincipal => false;
+        public Guid? ActorId { get; }
+        public string ActorDisplayName => "Limited";
+        public string CorrelationId => "image-access-test";
+        public string EditingSessionId => "image-access-test";
+        public bool IsFullAccess => false;
+        public IReadOnlyDictionary<string, AccessLevel> EffectivePermissions => _grants;
     }
 
     private sealed class TestActor : ICurrentActorContext

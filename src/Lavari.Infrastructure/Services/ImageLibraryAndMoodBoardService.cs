@@ -52,7 +52,7 @@ public sealed class ImageLibraryService : IImageLibraryService
             _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         }
 
-        var query = _db.ImageAssets.AsNoTracking().Include(x => x.Associations).AsQueryable();
+        IQueryable<ImageAssetEntity> query = VisibleImages().Include(x => x.Associations);
 
         if (filter.GlobalOnly)
         {
@@ -86,12 +86,18 @@ public sealed class ImageLibraryService : IImageLibraryService
         };
 
         var rows = await ordered.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        var clientNames = await _db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
-        var jobNames = await _db.Jobs.AsNoTracking().ToDictionaryAsync(j => j.Id, j => j.Name, ct);
         var canReadClients = _permissions.Has(ModuleKeys.Clients, AccessLevel.Read);
         var canReadJobs = _permissions.Has(ModuleKeys.Jobs, AccessLevel.Read);
+        var clientIds = rows.SelectMany(r => r.Associations).Where(a => a.ClientId.HasValue).Select(a => a.ClientId!.Value).Distinct().ToArray();
+        var jobIds = rows.SelectMany(r => r.Associations).Where(a => a.JobId.HasValue).Select(a => a.JobId!.Value).Distinct().ToArray();
+        var clientNames = canReadClients
+            ? await _db.Clients.AsNoTracking().Where(c => clientIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct)
+            : null;
+        var jobNames = canReadJobs
+            ? await _db.Jobs.AsNoTracking().Where(j => jobIds.Contains(j.Id)).ToDictionaryAsync(j => j.Id, j => j.Name, ct)
+            : null;
 
-        var items = rows.Select(r => MapAsset(r, false, canReadClients ? clientNames : null, canReadJobs ? jobNames : null)).ToArray();
+        var items = rows.Select(r => MapAsset(r, false, clientNames, jobNames)).ToArray();
         return new PagedResult<ImageAssetDto> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
     }
 
@@ -115,34 +121,21 @@ public sealed class ImageLibraryService : IImageLibraryService
             throw new ValidationServiceException("Image title is required.");
         }
 
-        Guid? resolvedClientId = clientId;
-        if (jobId.HasValue)
-        {
-            _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
-            var job = await _db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId.Value, ct)
-                ?? throw new NotFoundServiceException("Associated job not found.");
-            resolvedClientId ??= job.ClientId;
-        }
-        else if (clientId.HasValue)
-        {
-            _permissions.Require(ModuleKeys.Clients, AccessLevel.Read);
-            if (!await _db.Clients.AnyAsync(c => c.Id == clientId.Value, ct))
-            {
-                throw new NotFoundServiceException("Associated client not found.");
-            }
-        }
+        var (resolvedClientId, resolvedJobId) = await ValidateLinksAsync(clientId, jobId, productId, moodBoardId, ct);
 
         // Process and enforce 1080p aspect-preserving bound BEFORE writing to disk. Oversized original is never retained!
         var processed = _processor.ProcessForStorage(rawBytes.Span, declaredContentType);
 
         var mainKey = await _fileStore.SaveAsync("images", processed.Extension, processed.ProcessedBytes, ct);
         string? thumbKey = null;
+        ImageAssetEntity asset;
+        ImageAssociationEntity? association = null;
         try
         {
             thumbKey = await _fileStore.SaveAsync("thumbs", ".jpg", processed.ThumbnailBytes, ct);
 
             var actorId = _actor.ActorId ?? throw new UnauthorizedServiceException();
-            var asset = new ImageAssetEntity
+            asset = new ImageAssetEntity
             {
                 Id = _ids.NewId(),
                 Title = title.Trim(),
@@ -160,26 +153,19 @@ public sealed class ImageLibraryService : IImageLibraryService
                 UploadedByUserId = actorId,
                 IsGlobalLibrary = isGlobalLibrary
             };
-            _db.ImageAssets.Add(asset);
-
-            if (resolvedClientId.HasValue || jobId.HasValue || productId.HasValue || moodBoardId.HasValue)
+            if (resolvedClientId.HasValue || resolvedJobId.HasValue || productId.HasValue || moodBoardId.HasValue)
             {
-                _db.ImageAssociations.Add(new ImageAssociationEntity
+                association = new ImageAssociationEntity
                 {
                     Id = _ids.NewId(),
                     ImageAssetId = asset.Id,
                     ClientId = resolvedClientId,
-                    JobId = jobId,
+                    JobId = resolvedJobId,
                     ProductId = productId,
                     MoodBoardId = moodBoardId,
-                    AssociationType = moodBoardId.HasValue ? ImageAssociationType.MoodBoard : productId.HasValue ? ImageAssociationType.Product : jobId.HasValue ? ImageAssociationType.Job : ImageAssociationType.Client
-                });
+                    AssociationType = moodBoardId.HasValue ? ImageAssociationType.MoodBoard : productId.HasValue ? ImageAssociationType.Product : resolvedJobId.HasValue ? ImageAssociationType.Job : ImageAssociationType.Client
+                };
             }
-
-            await _db.SaveChangesAsync(ct);
-
-            var loaded = await _db.ImageAssets.AsNoTracking().Include(x => x.Associations).FirstAsync(x => x.Id == asset.Id, ct);
-            return MapAsset(loaded, processed.WasDownscaled, null, null);
         }
         catch
         {
@@ -190,29 +176,35 @@ public sealed class ImageLibraryService : IImageLibraryService
             }
             throw;
         }
+
+        // Once persistence is attempted, its outcome may be uncertain; never delete files that may be referenced.
+        _db.ImageAssets.Add(asset);
+        if (association is not null) _db.ImageAssociations.Add(association);
+        await _db.SaveChangesAsync(ct);
+
+        var loaded = await _db.ImageAssets.AsNoTracking().Include(x => x.Associations).FirstAsync(x => x.Id == asset.Id, ct);
+        return MapAsset(loaded, processed.WasDownscaled, null, null);
     }
 
     public async Task<ImageAssetDto> AddAssociationAsync(Guid imageAssetId, Guid? clientId, Guid? jobId, Guid? productId, ImageAssociationType associationType, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.ImageLibrary, AccessLevel.Alter);
-        var asset = await _db.ImageAssets.Include(x => x.Associations).FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
+        var asset = await VisibleImages().FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
             ?? throw new NotFoundServiceException("Image asset not found.");
 
-        Guid? resolvedClientId = clientId;
-        if (jobId.HasValue)
-        {
-            _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
-            var job = await _db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId.Value, ct)
-                ?? throw new NotFoundServiceException("Job not found.");
-            resolvedClientId ??= job.ClientId;
-        }
+        if (associationType is not (ImageAssociationType.Library or ImageAssociationType.Client or ImageAssociationType.Job or ImageAssociationType.Product) ||
+            (associationType == ImageAssociationType.Client && clientId is null && jobId is null) ||
+            (associationType == ImageAssociationType.Job && jobId is null) ||
+            (associationType == ImageAssociationType.Product && productId is null))
+            throw new ValidationServiceException("Select a valid image association and its related record.");
+        var (resolvedClientId, resolvedJobId) = await ValidateLinksAsync(clientId, jobId, productId, null, ct);
 
         _db.ImageAssociations.Add(new ImageAssociationEntity
         {
             Id = _ids.NewId(),
             ImageAssetId = asset.Id,
             ClientId = resolvedClientId,
-            JobId = jobId,
+            JobId = resolvedJobId,
             ProductId = productId,
             AssociationType = associationType
         });
@@ -222,21 +214,53 @@ public sealed class ImageLibraryService : IImageLibraryService
         return MapAsset(loaded, false, null, null);
     }
 
-    public async Task<(byte[] Bytes, string ContentType)> ReadImageBytesAsync(Guid imageAssetId, bool thumbnail, CancellationToken ct = default)
+    private async Task<(Guid? ClientId, Guid? JobId)> ValidateLinksAsync(
+        Guid? clientId, Guid? jobId, Guid? productId, Guid? moodBoardId, CancellationToken ct)
     {
-        _permissions.RequireAuthenticated();
-        var canRead = _permissions.Has(ModuleKeys.ImageLibrary, AccessLevel.Read)
-            || _permissions.Has(ModuleKeys.MoodBoards, AccessLevel.Read)
-            || _permissions.Has(ModuleKeys.Receipts, AccessLevel.Read)
-            || _permissions.Has(ModuleKeys.ProductCatalog, AccessLevel.Read)
-            || _permissions.Has(ModuleKeys.JobLineItems, AccessLevel.Read);
-
-        if (!canRead)
+        if (productId.HasValue)
         {
-            throw new ForbiddenServiceException("You do not have permission to view this image.");
+            _permissions.Require(ModuleKeys.ProductCatalog, AccessLevel.Read);
+            if (!await _db.Products.AnyAsync(p => p.Id == productId.Value, ct))
+                throw new NotFoundServiceException("Associated product not found.");
         }
 
-        var asset = await _db.ImageAssets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
+        if (moodBoardId.HasValue)
+        {
+            _permissions.Require(ModuleKeys.MoodBoards, AccessLevel.Read);
+            var board = await _db.MoodBoards.AsNoTracking()
+                .Where(b => b.Id == moodBoardId.Value).Select(b => new { b.JobId }).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundServiceException("Associated mood board not found.");
+            if (jobId.HasValue && jobId.Value != board.JobId)
+                throw new ValidationServiceException("The selected mood board does not belong to the selected job.");
+            jobId = board.JobId;
+        }
+
+        if (jobId.HasValue)
+        {
+            _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
+            _permissions.Require(ModuleKeys.Clients, AccessLevel.Read);
+            var job = await _db.Jobs.AsNoTracking()
+                .Where(j => j.Id == jobId.Value && _db.Clients.Any(c => c.Id == j.ClientId) &&
+                    _db.JobGroups.Any(g => g.Id == j.JobGroupId && g.ClientId == j.ClientId))
+                .Select(j => new { j.ClientId }).FirstOrDefaultAsync(ct)
+                ?? throw new NotFoundServiceException("Associated job not found.");
+            if (clientId.HasValue && clientId.Value != job.ClientId)
+                throw new ValidationServiceException("The selected job does not belong to the selected client.");
+            clientId = job.ClientId;
+        }
+        else if (clientId.HasValue)
+        {
+            _permissions.Require(ModuleKeys.Clients, AccessLevel.Read);
+            if (!await _db.Clients.AnyAsync(c => c.Id == clientId.Value, ct))
+                throw new NotFoundServiceException("Associated client not found.");
+        }
+        return (clientId, jobId);
+    }
+
+    public async Task<(byte[] Bytes, string ContentType)> ReadImageBytesAsync(Guid imageAssetId, bool thumbnail, CancellationToken ct = default)
+    {
+        _permissions.Require(ModuleKeys.ImageLibrary, AccessLevel.Read);
+        var asset = await VisibleImages().FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
             ?? throw new NotFoundServiceException("Image asset not found.");
 
         var key = thumbnail ? asset.ThumbnailStorageKey : asset.StorageKey;
@@ -244,10 +268,82 @@ public sealed class ImageLibraryService : IImageLibraryService
         return (bytes, thumbnail ? "image/jpeg" : asset.ContentType);
     }
 
+    private IQueryable<ImageAssetEntity> VisibleImages(bool includeDeleted = false)
+    {
+        var clients = _db.Clients.Where(c => c.DeletedAtUtc == null);
+        var groups = _db.JobGroups.Where(g => g.DeletedAtUtc == null);
+        var jobs = _db.Jobs.Where(j => j.DeletedAtUtc == null && clients.Any(c => c.Id == j.ClientId) &&
+            groups.Any(g => g.Id == j.JobGroupId && g.ClientId == j.ClientId));
+        var products = _db.Products.Where(p => p.DeletedAtUtc == null);
+        var variants = _db.ProductVariants.Where(v => v.DeletedAtUtc == null);
+        var lines = _db.JobLineItems.Where(l => l.DeletedAtUtc == null);
+        var associations = _db.ImageAssociations.Where(a => a.DeletedAtUtc == null);
+        var boards = _db.MoodBoards.Where(b => b.DeletedAtUtc == null && jobs.Any(j => j.Id == b.JobId));
+        var canvases = _db.MoodBoardCanvases.Where(c => c.DeletedAtUtc == null);
+        var elements = _db.MoodBoardElements.Where(e => e.DeletedAtUtc == null);
+        var allReceipts = _db.Receipts.Where(r => r.DeletedAtUtc == null);
+        var receipts = allReceipts.Where(r => jobs.Any(j => j.Id == r.JobId));
+        IQueryable<ImageAssetEntity> assets = _db.ImageAssets.AsNoTracking();
+        if (includeDeleted) assets = assets.IgnoreQueryFilters();
+        var query = assets
+            .Where(image => image.AiSourceImageAssetId == null)
+            .Where(image => image.IsGlobalLibrary || image.UploadedByUserId == _actor.ActorId ||
+                associations.Any(a => a.ImageAssetId == image.Id) ||
+                products.Any(p => p.PrimaryImageAssetId == image.Id) ||
+                variants.Any(v => v.ImageAssetId == image.Id) ||
+                lines.Any(l => l.ImageAssetId == image.Id) ||
+                allReceipts.Any(r => r.ImageAssetId == image.Id) ||
+                elements.Any(e => e.ImageAssetId == image.Id))
+            .Where(image => !associations.Any(a => a.ImageAssetId == image.Id && (
+                (a.AssociationType != ImageAssociationType.Library && a.AssociationType != ImageAssociationType.Client &&
+                 a.AssociationType != ImageAssociationType.Job && a.AssociationType != ImageAssociationType.Product &&
+                 a.AssociationType != ImageAssociationType.MoodBoard && a.AssociationType != ImageAssociationType.Receipt) ||
+                (a.AssociationType == ImageAssociationType.Client && a.ClientId == null) ||
+                (a.AssociationType == ImageAssociationType.Job && a.JobId == null) ||
+                (a.AssociationType == ImageAssociationType.Product && a.ProductId == null) ||
+                (a.AssociationType == ImageAssociationType.MoodBoard && a.MoodBoardId == null) ||
+                (a.AssociationType == ImageAssociationType.Receipt && a.ReceiptId == null) ||
+                (a.ClientId != null && !clients.Any(c => c.Id == a.ClientId)) ||
+                (a.JobId != null && !jobs.Any(j => j.Id == a.JobId && (a.ClientId == null || j.ClientId == a.ClientId))) ||
+                (a.ProductId != null && !products.Any(p => p.Id == a.ProductId)) ||
+                (a.MoodBoardId != null && !boards.Any(b => b.Id == a.MoodBoardId && (a.JobId == null || b.JobId == a.JobId) &&
+                    jobs.Any(j => j.Id == b.JobId && (a.ClientId == null || j.ClientId == a.ClientId)))) ||
+                (a.ReceiptId != null && !receipts.Any(r => r.Id == a.ReceiptId && (a.JobId == null || r.JobId == a.JobId) &&
+                    jobs.Any(j => j.Id == r.JobId && (a.ClientId == null || j.ClientId == a.ClientId)))))))
+            .Where(image => !variants.Any(v => v.ImageAssetId == image.Id && !products.Any(p => p.Id == v.ProductId)))
+            .Where(image => !lines.Any(l => l.ImageAssetId == image.Id && !jobs.Any(j => j.Id == l.JobId)))
+            .Where(image => !allReceipts.Any(r => r.ImageAssetId == image.Id && !jobs.Any(j => j.Id == r.JobId)))
+            .Where(image => !elements.Any(e => e.ImageAssetId == image.Id &&
+                !canvases.Any(c => c.Id == e.CanvasId && boards.Any(b => b.Id == c.MoodBoardId))));
+
+        if (!_permissions.Has(ModuleKeys.Clients, AccessLevel.Read))
+            query = query.Where(image => !associations.Any(a => a.ImageAssetId == image.Id && a.ClientId != null));
+        if (!_permissions.Has(ModuleKeys.Clients, AccessLevel.Read) || !_permissions.Has(ModuleKeys.Jobs, AccessLevel.Read))
+            query = query.Where(image =>
+                !associations.Any(a => a.ImageAssetId == image.Id && (a.JobId != null || a.MoodBoardId != null || a.ReceiptId != null)) &&
+                !lines.Any(l => l.ImageAssetId == image.Id) &&
+                !allReceipts.Any(r => r.ImageAssetId == image.Id) &&
+                !elements.Any(e => e.ImageAssetId == image.Id));
+        if (!_permissions.Has(ModuleKeys.ProductCatalog, AccessLevel.Read))
+            query = query.Where(image => !associations.Any(a => a.ImageAssetId == image.Id && a.ProductId != null) &&
+                !products.Any(p => p.PrimaryImageAssetId == image.Id) &&
+                !variants.Any(v => v.ImageAssetId == image.Id));
+        if (!_permissions.Has(ModuleKeys.JobLineItems, AccessLevel.Read))
+            query = query.Where(image => !lines.Any(l => l.ImageAssetId == image.Id));
+        if (!_permissions.Has(ModuleKeys.Receipts, AccessLevel.Read))
+            query = query.Where(image => !associations.Any(a => a.ImageAssetId == image.Id && a.ReceiptId != null) &&
+                !allReceipts.Any(r => r.ImageAssetId == image.Id));
+        if (!_permissions.Has(ModuleKeys.MoodBoards, AccessLevel.Read))
+            query = query.Where(image => !associations.Any(a => a.ImageAssetId == image.Id && a.MoodBoardId != null) &&
+                !elements.Any(e => e.ImageAssetId == image.Id));
+        return query;
+    }
+
     public async Task SoftDeleteAsync(Guid imageAssetId, string concurrencyToken, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.ImageLibrary, AccessLevel.Delete);
-        var asset = await _db.ImageAssets.FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
+        var visibleIds = VisibleImages().Select(x => x.Id);
+        var asset = await _db.ImageAssets.FirstOrDefaultAsync(x => x.Id == imageAssetId && visibleIds.Contains(x.Id), ct)
             ?? throw new NotFoundServiceException("Image asset not found.");
 
         if (!string.Equals(asset.ConcurrencyToken, concurrencyToken, StringComparison.Ordinal))
@@ -259,12 +355,14 @@ public sealed class ImageLibraryService : IImageLibraryService
         var inUse = await _db.MoodBoardElements.AnyAsync(e => e.ImageAssetId == imageAssetId, ct)
             || await _db.Receipts.AnyAsync(r => r.ImageAssetId == imageAssetId, ct)
             || await _db.JobLineItems.AnyAsync(l => l.ImageAssetId == imageAssetId, ct)
-            || await _db.Products.AnyAsync(p => p.PrimaryImageAssetId == imageAssetId, ct);
+            || await _db.Products.AnyAsync(p => p.PrimaryImageAssetId == imageAssetId, ct)
+            || await _db.ProductVariants.AnyAsync(v => v.ImageAssetId == imageAssetId, ct)
+            || await _db.ImageAssets.AnyAsync(i => i.AiSourceImageAssetId == imageAssetId, ct);
 
         if (inUse)
         {
             throw new ConflictServiceException(
-                "This image cannot be deleted because it is actively referenced by a mood board, receipt, product or job line item.",
+                "This image cannot be deleted while it is actively referenced.",
                 ErrorCodes.ActiveReferencesPreventDelete);
         }
 
@@ -276,7 +374,9 @@ public sealed class ImageLibraryService : IImageLibraryService
     public async Task RestoreAsync(Guid imageAssetId, string concurrencyToken, CancellationToken ct = default)
     {
         _permissions.Require(ModuleKeys.ImageLibrary, AccessLevel.Delete);
-        var asset = await _db.ImageAssets.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == imageAssetId, ct)
+        var visibleIds = VisibleImages(includeDeleted: true).Select(x => x.Id);
+        var asset = await _db.ImageAssets.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == imageAssetId && visibleIds.Contains(x.Id), ct)
             ?? throw new NotFoundServiceException("Image asset not found.");
 
         if (!string.Equals(asset.ConcurrencyToken, concurrencyToken, StringComparison.Ordinal))
@@ -334,6 +434,7 @@ public sealed class MoodBoardService : IMoodBoardService
     private readonly IPermissionEvaluator _permissions;
     private readonly IAdminService _admin;
     private readonly IPrivateFileStore _fileStore;
+    private readonly IImageLibraryService _images;
     private readonly IPdfRenderer _pdfRenderer;
     private readonly TimeProvider _timeProvider;
     private readonly IIdGenerator _ids;
@@ -344,6 +445,7 @@ public sealed class MoodBoardService : IMoodBoardService
         IPermissionEvaluator permissions,
         IAdminService admin,
         IPrivateFileStore fileStore,
+        IImageLibraryService images,
         IPdfRenderer pdfRenderer,
         TimeProvider timeProvider,
         IIdGenerator ids)
@@ -353,6 +455,7 @@ public sealed class MoodBoardService : IMoodBoardService
         _permissions = permissions;
         _admin = admin;
         _fileStore = fileStore;
+        _images = images;
         _pdfRenderer = pdfRenderer;
         _timeProvider = timeProvider;
         _ids = ids;
@@ -616,15 +719,10 @@ public sealed class MoodBoardService : IMoodBoardService
         var imageBytesMap = new Dictionary<Guid, byte[]>();
         if (imageIds.Count > 0)
         {
-            var assets = await _db.ImageAssets.AsNoTracking()
-                .Where(a => imageIds.Contains(a.Id))
-                .ToListAsync(ct);
-            foreach (var asset in assets)
+            foreach (var imageId in imageIds)
             {
-                if (await _fileStore.ExistsAsync(asset.StorageKey, ct))
-                {
-                    imageBytesMap[asset.Id] = await _fileStore.ReadAsync(asset.StorageKey, ct);
-                }
+                var (bytes, _) = await _images.ReadImageBytesAsync(imageId, thumbnail: false, ct);
+                imageBytesMap[imageId] = bytes;
             }
         }
 

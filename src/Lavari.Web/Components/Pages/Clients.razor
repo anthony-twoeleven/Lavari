@@ -3,7 +3,7 @@
 @inject AppSessionState AppState
 
 <div class="lv-row" style="justify-content:space-between">
-    <h1 style="margin:0;font-size:1.5rem">Clients, Job Groups &amp; Jobs</h1>
+    <h1 class="lv-page-title">Clients, Job Groups &amp; Jobs</h1>
     <div class="lv-row">
         <input class="lv-input" style="width:220px" aria-label="Search clients" placeholder="Search clients..." @bind="_search" />
         <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>

@@ -11,7 +11,7 @@
 <LvErrorBanner Error="_error" />
 @if (_previewReverted)
 {
-    <p role="status">Your saved appearance was restored. Your selections are still available to retry.</p>
+    <p class="lv-appearance-status" role="status">Your saved appearance was restored. Your selections are still available to retry.</p>
 }
 @if (_loading)
 {
@@ -19,59 +19,115 @@
 }
 else if (_saved is not null)
 {
-    <LvCard Title="Appearance" Subtitle="Choose how Lavari looks on your devices.">
-        <fieldset class="lv-choice-group" disabled="@(!CanEdit || _saving)">
-            <legend>Theme</legend>
-            <div class="lv-choice-row">
+    <section class="lv-appearance" aria-labelledby="appearance-heading">
+        <div class="lv-appearance-heading">
+            <div>
+                <p class="lv-eyebrow">PERSONALIZE YOUR WORKSPACE</p>
+                <h2 id="appearance-heading">Appearance</h2>
+                <p>Choose a light or dark canvas, then give your studio a considered color story.</p>
+            </div>
+            <span class="lv-appearance-badge"><span aria-hidden="true">✦</span> Material color roles</span>
+        </div>
+
+        <fieldset class="lv-appearance-group lv-theme-options" disabled="@(!CanEdit || _saving)">
+            <legend><span>01</span> Theme <small>Choose the surface that feels right</small></legend>
+            <div class="lv-appearance-grid lv-theme-grid">
                 @foreach (var option in Modes)
                 {
-                    <label class="lv-choice">
+                    <label class="lv-appearance-option lv-theme-option">
                         <input type="radio" name="theme-mode" value="@option.Value" checked="@(_mode == option.Value)"
                                @onchange="() => SetModeAsync(option.Value)" />
-                        <span>@option.Label</span>
+                        <span class="lv-option-check" aria-hidden="true">✓</span>
+                        <span class="lv-theme-preview lv-theme-preview-@option.Value" aria-hidden="true">
+                            <span class="lv-theme-preview-bar"></span>
+                            <span class="lv-theme-preview-body">
+                                <span class="lv-theme-preview-rail"></span>
+                                <span class="lv-theme-preview-card">
+                                    <span></span><span></span><span></span>
+                                </span>
+                            </span>
+                            @if (option.Value == "system")
+                            {
+                                <span class="lv-theme-preview-system-icon">◐</span>
+                            }
+                        </span>
+                        <span class="lv-option-copy">
+                            <strong>@option.Label</strong>
+                            <small>@option.Description</small>
+                        </span>
                     </label>
                 }
             </div>
         </fieldset>
-        <fieldset class="lv-choice-group" disabled="@(!CanEdit || _saving)">
-            <legend>Highlight color</legend>
-            <div class="lv-choice-row">
+
+        <fieldset class="lv-appearance-group lv-palette-options" disabled="@(!CanEdit || _saving)">
+            <legend><span>02</span> Color palette <small>Five coordinated, static schemes for light and dark</small></legend>
+            <div class="lv-appearance-grid lv-palette-grid">
                 @foreach (var option in Colors)
                 {
-                    <label class="lv-choice">
+                    <label class="lv-appearance-option lv-palette-option">
                         <input type="radio" name="theme-color" value="@option.Value" checked="@(_color == option.Value)"
                                @onchange="() => SetColorAsync(option.Value)" />
-                        <span class="lv-swatch lv-swatch-@option.Value" aria-hidden="true"></span>
-                        <span>@option.Label</span>
+                        <span class="lv-option-check" aria-hidden="true">✓</span>
+                        <span class="lv-palette-card-heading">
+                            <span class="lv-palette-swatch lv-palette-swatch-@option.Value" aria-hidden="true"></span>
+                            <span class="lv-option-copy">
+                                <strong>@option.Label</strong>
+                                <small>@option.Description</small>
+                            </span>
+                        </span>
+                        <span class="lv-palette-preview" data-palette="@option.Value" aria-hidden="true">
+                            <span class="lv-palette-demo-toolbar"><span></span><span></span><span></span></span>
+                            <span class="lv-palette-demo-content">
+                                <span class="lv-palette-demo-title"><span></span><span></span></span>
+                                <span class="lv-palette-demo-button">New project</span>
+                                <span class="lv-palette-demo-chip">In progress</span>
+                            </span>
+                            <span class="lv-palette-role-swatches">
+                                <span><i></i><small>Primary</small></span>
+                                <span><i></i><small>Secondary</small></span>
+                                <span><i></i><small>Tertiary</small></span>
+                                <span><i></i><small>Neutral</small></span>
+                            </span>
+                        </span>
                     </label>
                 }
             </div>
         </fieldset>
         @if (!CanEdit)
         {
-            <p>You can view these settings, but you need permission to change them.</p>
+            <p class="lv-appearance-permission">You can view these settings, but you need permission to change them.</p>
         }
-        <div class="lv-row">
-            <LvButton Loading="_saving" Disabled="@(!CanEdit || !IsDirty)" OnClick="SaveAsync">Save changes</LvButton>
-            <LvButton Variant="outlined" Disabled="@(!IsDirty || _saving)" OnClick="CancelAsync">Cancel</LvButton>
-            <LvButton Variant="outlined" Disabled="@(!CanEdit || _saving || (_mode == "system" && _color == "lavender"))" OnClick="ResetAsync">Reset to defaults</LvButton>
+        <div class="lv-appearance-actions">
+            <span class="lv-appearance-hint">Your changes preview here and are only saved when you apply them.</span>
+            <div class="lv-row">
+                <LvButton Loading="_saving" Disabled="@(!CanEdit || !IsDirty)" OnClick="SaveAsync">Apply appearance</LvButton>
+                <LvButton Variant="outlined" Disabled="@(!IsDirty || _saving)" OnClick="CancelAsync">Cancel</LvButton>
+                <LvButton Variant="outlined" Disabled="@(!CanEdit || _saving || (_mode == "system" && _color == "purple"))" OnClick="ResetAsync">Reset</LvButton>
+            </div>
         </div>
         @if (_savedNotice)
         {
-            <p role="status">Appearance saved.</p>
+            <p class="lv-appearance-status" role="status">Appearance saved across your devices.</p>
         }
-    </LvCard>
+    </section>
 }
 
 @code {
-    private static readonly (string Value, string Label)[] Modes =
-        [("system", "System"), ("light", "Light"), ("dark", "Dark")];
-    private static readonly (string Value, string Label)[] Colors =
-        [("lavender", "Lavender"), ("blue", "Blue"), ("green", "Green"), ("rose", "Rose")];
+    private static readonly (string Value, string Label, string Description)[] Modes =
+        [("system", "System", "Follow your device"),
+         ("light", "Light", "Bright and airy"),
+         ("dark", "Dark", "Soft on the eyes")];
+    private static readonly (string Value, string Label, string Description)[] Colors =
+        [("purple", "Purple", "Quietly expressive"),
+         ("green", "Green", "Grounded and natural"),
+         ("coral", "Coral", "Warm and welcoming"),
+         ("blue", "Blue", "Clear and composed"),
+         ("neutral", "Neutral", "Calm and minimal")];
     private AppearanceDto? _saved;
     private ApiErrorResponse? _error;
     private string _mode = "system";
-    private string _color = "lavender";
+    private string _color = "purple";
     private bool _loading = true;
     private bool _saving;
     private bool _savedNotice;
@@ -99,7 +155,7 @@ else if (_saved is not null)
     private async Task ResetAsync()
     {
         _mode = "system";
-        _color = "lavender";
+        _color = "purple";
         _savedNotice = false;
         _previewReverted = false;
         await PreviewAsync();
@@ -147,7 +203,14 @@ else if (_saved is not null)
     private async Task BeforeNavigationAsync(LocationChangingContext context)
     {
         if (!IsDirty) return;
-        if (!await JS.InvokeAsync<bool>("confirm", "Discard your appearance changes?"))
+        bool confirmed;
+        try { confirmed = await JS.InvokeAsync<bool>("confirm", "Discard your appearance changes?"); }
+        catch (JSDisconnectedException)
+        {
+            context.PreventNavigation();
+            return;
+        }
+        if (!confirmed)
         {
             context.PreventNavigation();
             return;

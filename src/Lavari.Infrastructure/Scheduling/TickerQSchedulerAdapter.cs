@@ -1,6 +1,6 @@
-using System.Text.Json;
 using Lavari.Application.Abstractions;
 using Lavari.Application.Locking;
+using Lavari.Domain.Errors;
 using Microsoft.Extensions.Logging;
 using TickerQ.Utilities;
 using TickerQ.Utilities.Base;
@@ -89,8 +89,7 @@ public sealed class ScheduledMaintenanceJobs
 
 public sealed class NullBackgroundJobScheduler : IBackgroundJobScheduler
 {
-    private readonly TimeProvider _timeProvider;
-    public NullBackgroundJobScheduler(TimeProvider timeProvider) => _timeProvider = timeProvider;
+    public NullBackgroundJobScheduler(TimeProvider timeProvider) => ArgumentNullException.ThrowIfNull(timeProvider);
 
     public Task<Guid> ScheduleOneTimeAsync<TPayload>(
         string functionName,
@@ -98,15 +97,19 @@ public sealed class NullBackgroundJobScheduler : IBackgroundJobScheduler
         DateTimeOffset executeAtUtc,
         string? description = null,
         CancellationToken ct = default) where TPayload : notnull
-    {
-        _ = JsonSerializer.Serialize(payload);
-        return Task.FromResult(Guid.CreateVersion7(_timeProvider.GetUtcNow()));
-    }
+        => Unavailable(ct);
 
     public Task<Guid> EnqueueImmediateAsync<TPayload>(
         string functionName,
         TPayload payload,
         string? description = null,
         CancellationToken ct = default) where TPayload : notnull
-        => ScheduleOneTimeAsync(functionName, payload, _timeProvider.GetUtcNow(), description, ct);
+        => Unavailable(ct);
+
+    private static Task<Guid> Unavailable(CancellationToken ct)
+        => ct.IsCancellationRequested
+            ? Task.FromCanceled<Guid>(ct)
+            : Task.FromException<Guid>(new ExternalIntegrationServiceException(
+                "Background processing is unavailable.",
+                possibleCause: "Ask an administrator to configure a durable scheduler."));
 }

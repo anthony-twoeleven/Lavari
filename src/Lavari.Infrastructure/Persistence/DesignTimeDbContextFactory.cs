@@ -25,7 +25,6 @@ public sealed class SystemActorContext : ICurrentActorContext
     public static readonly SystemActorContext DesignTime = new("design-time", "EF Design Time");
     public static readonly SystemActorContext Seeder = new("system-seeder", "System Seeder");
     public static readonly SystemActorContext Scheduler = new("system-scheduler", "Background Scheduler");
-    public static readonly SystemActorContext LlmService = new("system-llm-extractor", "LLM Extraction Service");
 
     private static readonly IReadOnlyDictionary<string, AccessLevel> FullSystemGrants =
         PermissionRegistry.ComputeEffectiveGrants(

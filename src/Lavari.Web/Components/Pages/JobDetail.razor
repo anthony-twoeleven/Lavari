@@ -1594,6 +1594,7 @@ else
             _cameraError = error;
             _cameraLive = error is null;
         }
+        catch (JSDisconnectedException) { }
         finally
         {
             if (attempt == _cameraAttempt) _cameraLoading = false;
@@ -1602,7 +1603,10 @@ else
 
     private async Task TakeReceiptPhotoAsync()
     {
-        if (!await JS.InvokeAsync<bool>("lavariInterop.takeReceiptPhoto", _receiptVideo, _receiptCanvas))
+        bool captured;
+        try { captured = await JS.InvokeAsync<bool>("lavariInterop.takeReceiptPhoto", _receiptVideo, _receiptCanvas); }
+        catch (JSDisconnectedException) { return; }
+        if (!captured)
         {
             if (_showReceiptModal) _cameraError = "The camera is not ready yet. Try again or choose a photo.";
             return;
@@ -1627,13 +1631,10 @@ else
         _cameraAttempt++;
         _cameraLive = _cameraPhoto = _cameraLoading = false;
         _cameraError = null;
-        await JS.InvokeVoidAsync("lavariInterop.resetReceiptCamera");
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (!_showReceiptModal) return;
-        try { await ResetReceiptCameraAsync(); }
+        try { await JS.InvokeVoidAsync("lavariInterop.resetReceiptCamera"); }
         catch (JSDisconnectedException) { }
     }
+
+    public ValueTask DisposeAsync() =>
+        _showReceiptModal ? new ValueTask(ResetReceiptCameraAsync()) : ValueTask.CompletedTask;
 }

@@ -36,7 +36,8 @@
     {
         if (_shown && !Open)
         {
-            await JS.InvokeVoidAsync("lavariInterop.closeDialog", _dialog);
+            try { await JS.InvokeVoidAsync("lavariInterop.closeDialog", _dialog); }
+            catch (JSDisconnectedException) { }
             _shown = false;
         }
     }
@@ -45,8 +46,12 @@
     {
         if (Open && !_shown)
         {
-            await JS.InvokeVoidAsync("lavariInterop.openDialog", _dialog);
-            _shown = true;
+            try
+            {
+                await JS.InvokeVoidAsync("lavariInterop.openDialog", _dialog);
+                _shown = true;
+            }
+            catch (JSDisconnectedException) { }
         }
     }
 

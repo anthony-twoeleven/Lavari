@@ -11,15 +11,20 @@ public sealed class LavariBrowserApiClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly IJSRuntime _js;
+    private readonly ILogger<LavariBrowserApiClient> _logger;
 
-    public LavariBrowserApiClient(IJSRuntime js) => _js = js;
+    public LavariBrowserApiClient(IJSRuntime js, ILogger<LavariBrowserApiClient> logger)
+    {
+        _js = js;
+        _logger = logger;
+    }
 
-    public ValueTask SetCsrfTokenAsync(string? token) => _js.InvokeVoidAsync("lavariInterop.setCsrfToken", token);
-    public ValueTask SetEditingSessionAsync(string? sessionId) => _js.InvokeVoidAsync("lavariInterop.setEditingSession", sessionId);
-    public ValueTask<string?> GetBrowserTimeZoneAsync() => _js.InvokeAsync<string?>("lavariInterop.getBrowserTimeZone");
-    public ValueTask DownloadUrlAsync(string url) => _js.InvokeVoidAsync("lavariInterop.downloadUrl", url);
-    public ValueTask SetDirtyGuardAsync(bool isDirty) => _js.InvokeVoidAsync("lavariInterop.setDirtyGuard", isDirty);
-    public ValueTask SetAppearanceAsync(string mode, string color) => _js.InvokeVoidAsync("lavariInterop.setAppearance", mode, color);
+    public ValueTask SetCsrfTokenAsync(string? token) => InvokeBrowserVoidAsync("lavariInterop.setCsrfToken", token);
+    public ValueTask SetEditingSessionAsync(string? sessionId) => InvokeBrowserVoidAsync("lavariInterop.setEditingSession", sessionId);
+    public ValueTask<string?> GetBrowserTimeZoneAsync() => InvokeBrowserAsync<string?>("lavariInterop.getBrowserTimeZone");
+    public ValueTask DownloadUrlAsync(string url) => InvokeBrowserVoidAsync("lavariInterop.downloadUrl", url);
+    public ValueTask SetDirtyGuardAsync(bool isDirty) => InvokeBrowserVoidAsync("lavariInterop.setDirtyGuard", isDirty);
+    public ValueTask SetAppearanceAsync(string mode, string color) => InvokeBrowserVoidAsync("lavariInterop.setAppearance", mode, color);
 
     public async Task RefreshCsrfTokenAsync()
     {
@@ -64,24 +69,44 @@ public sealed class LavariBrowserApiClient
         byte[] bytes)
     {
         var b64 = Convert.ToBase64String(bytes);
-        var jsResp = await _js.InvokeAsync<JsFetchResponse>("lavariInterop.uploadFile", url, fields, fileName, contentType, b64);
+        var jsResp = await InvokeBrowserAsync<JsFetchResponse>("lavariInterop.uploadFile", url, fields, fileName, contentType, b64);
         return ParseResponse<T>(jsResp);
     }
 
     public async Task<ApiCallResult<T>> UploadReceiptPhotoAsync<T>(string url, Dictionary<string, string?> fields)
     {
-        var response = await _js.InvokeAsync<JsFetchResponse>("lavariInterop.uploadReceiptPhoto", url, fields);
+        var response = await InvokeBrowserAsync<JsFetchResponse>("lavariInterop.uploadReceiptPhoto", url, fields);
         return ParseResponse<T>(response);
     }
 
     private async Task<ApiCallResult<T>> SendAsync<T>(string method, string url, object? body)
     {
         var bodyJson = body is null ? null : JsonSerializer.Serialize(body, JsonOpts);
-        await using var reference = await _js.InvokeAsync<IJSStreamReference>("lavariInterop.fetchJson", method, url, bodyJson);
+        await using var reference = await InvokeBrowserAsync<IJSStreamReference>("lavariInterop.fetchJson", method, url, bodyJson);
         await using var stream = await reference.OpenReadStreamAsync(16 * 1024 * 1024);
         var jsResp = await JsonSerializer.DeserializeAsync<JsFetchResponse>(stream, JsonOpts)
             ?? throw new JsonException("Missing browser API response.");
         return ParseResponse<T>(jsResp);
+    }
+
+    private async ValueTask InvokeBrowserVoidAsync(string identifier, params object?[] args)
+    {
+        try { await _js.InvokeVoidAsync(identifier, args); }
+        catch (Exception ex) when (ex is JSDisconnectedException or JSException)
+        {
+            _logger.LogWarning("Browser interop call {Identifier} failed ({ExceptionType}).", identifier, ex.GetType().Name);
+            throw;
+        }
+    }
+
+    private async ValueTask<T> InvokeBrowserAsync<T>(string identifier, params object?[] args)
+    {
+        try { return await _js.InvokeAsync<T>(identifier, args); }
+        catch (Exception ex) when (ex is JSDisconnectedException or JSException)
+        {
+            _logger.LogWarning("Browser interop call {Identifier} failed ({ExceptionType}).", identifier, ex.GetType().Name);
+            throw;
+        }
     }
 
     private static ApiCallResult<T> ParseResponse<T>(JsFetchResponse jsResp)

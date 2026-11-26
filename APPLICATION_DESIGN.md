@@ -155,6 +155,11 @@ relevant features are implemented.
   service identity, least-privilege permissions and audit history. Treat
   suggestions as untrusted drafts, not authoritative facts or automatic
   purchases, and protect supplier sessions and customer data.
+- Future AI assistance can answer questions using explicitly authorized
+  application information, suggest links and prepare job drafts for review.
+  Future image editing can create a separately retained AI-derived image
+  without replacing its source. Both require explicit consent, appropriate
+  data rights and the same permission, audit and review protections.
 
 The conceptual model includes Client, JobGroup, Job, JobDate, TimeEntry,
 Product, ProductVariant, JobLineItem, MoodBoard, MoodBoardCanvas, Quote,
@@ -201,10 +206,12 @@ system and integration activity, is attributable to a named actor.
   UTC timestamps.
 - Follow the device's light or dark preference, including changes while the
   application is open. Do not rely on color alone to convey state.
-- Account appearance offers System (default), Light and Dark modes and a
-  curated highlight-color palette. Save preferences per user, apply them
-  across devices, and preview changes before saving. Require an explicit
-  account appearance grant; audit and concurrency-check updates.
+- Account appearance offers System (default), Light and Dark modes and static
+  Purple, Green, Coral, Blue and Neutral palettes with coordinated primary,
+  secondary, tertiary and surface roles in both themes. Save preferences per
+  user, preview them in selectable cards before saving, and apply them across
+  devices. Require an explicit account appearance grant; audit and
+  concurrency-check updates.
 - Validate required inputs before a request and display actionable,
   field-specific feedback; the server validates independently.
 - Create and update buttons are disabled until a form differs from its

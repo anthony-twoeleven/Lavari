@@ -3,15 +3,17 @@
 @inject AppSessionState AppState
 @inject IFormattingService Formatting
 @using System.Text.Json
+@using System.Globalization
+@using Lavari.Contracts.Locking
 
 <div class="lv-row" style="justify-content:space-between">
-    <h1 style="margin:0;font-size:1.5rem">Global Product Catalog &amp; Supplier Capture</h1>
+    <h1 class="lv-page-title">Global Product Catalog &amp; Supplier Capture</h1>
     <div class="lv-row">
         <input class="lv-input" style="width:220px" aria-label="Search products" placeholder="Search products..." @bind="_search" />
         <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>
         @if (AppState.Can(ModuleKeys.SupplierCapture, AccessLevel.Alter))
         {
-            <LvButton Variant="outlined" OnClick="() => _showCaptureModal = true">Capture Supplier Page</LvButton>
+            <LvButton Variant="outlined" OnClick="OpenCaptureAsync">Capture Supplier Page</LvButton>
         }
         @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Alter))
         {
@@ -55,6 +57,14 @@
                             }
                         </td>
                         <td>
+                            @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Alter))
+                            {
+                                <LvButton Variant="outlined" Small="true" OnClick="() => EditProduct(p)">Edit</LvButton>
+                            }
+                            @if (AppState.Can(ModuleKeys.Jobs, AccessLevel.Read) && AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Alter))
+                            {
+                                <LvButton Variant="outlined" Small="true" OnClick="() => OpenAssignProductAsync(p)">Assign to job</LvButton>
+                            }
                             @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Delete))
                             {
                                 <LvButton Variant="outlined" Small="true" OnClick="() => DeleteProductAsync(p)">Delete</LvButton>
@@ -72,7 +82,7 @@
     <LvCard Title="Captured drafts" Subtitle="Review these suggestions before manually adding a product.">
         <div class="lv-table-wrap">
             <table class="lv-table">
-                <thead><tr><th>Source URL</th><th>Provider</th><th>Status</th><th>Extracted Draft</th></tr></thead>
+                <thead><tr><th>Source URL</th><th>Provider</th><th>Status</th><th>Extracted Draft</th><th></th></tr></thead>
                 <tbody>
                     @foreach (var d in _drafts)
                     {
@@ -102,6 +112,18 @@
                                 }
                                 <details><summary>Original extracted data</summary><pre class="lv-audit-data">@d.ExtractedJson</pre></details>
                             </td>
+                            <td>
+                                @if (d.Status == "PendingReview" &&
+                                     AppState.Can(ModuleKeys.SupplierCapture, AccessLevel.Alter) &&
+                                     AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Alter))
+                                {
+                                    <LvButton Small="true" OnClick="() => ReviewDraft(d)">Review &amp; add product</LvButton>
+                                }
+                                else if (d.AcceptedProductId.HasValue)
+                                {
+                                    <span>Product added</span>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -110,7 +132,7 @@
     </LvCard>
 }
 
-<LvDialog Open="_showProductModal" Title="Add Catalog Product" OnClose="() => _showProductModal = false">
+<LvDialog Open="_showProductModal" Title="@ProductModalTitle" OnClose="() => _showProductModal = false">
     <ChildContent>
         <div style="display:flex;flex-direction:column;gap:12px">
             <LvTextField Label="Product Name" Required="true" Value="@_name" ValueChanged="v => _name = v ?? string.Empty" />
@@ -125,33 +147,95 @@
             </div>
             <LvTextField Label="Description" Multiline="true" Value="@_description" ValueChanged="v => _description = v" />
             <LvTextField Label="Custom Attributes (one per line: Key=Value, e.g. Colour=Porcelain)" Multiline="true" Value="@_attributesText" ValueChanged="v => _attributesText = v ?? string.Empty" />
+            <LvTextField Label="Supplier image references (one URL per line)" Multiline="true" Value="@_sourceImageUrlsText" ValueChanged="v => _sourceImageUrlsText = v ?? string.Empty" />
+            <small>These URLs are saved as references only; Lavari will not fetch or display them. To use an image, download it yourself and upload it through the Media Library after confirming usage rights.</small>
         </div>
     </ChildContent>
     <Actions>
         <LvButton Variant="outlined" OnClick="() => _showProductModal = false">Cancel</LvButton>
-        <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_name)" OnClick="SaveProductAsync">Save Product</LvButton>
+        <LvButton Loading="_saving" Disabled="@string.IsNullOrWhiteSpace(_name)" OnClick="SaveProductAsync">@ProductSaveLabel</LvButton>
+    </Actions>
+</LvDialog>
+
+<LvDialog Open="_showAssignModal" Title="Assign Catalog Product to Job" OnClose="() => _showAssignModal = false">
+    <ChildContent>
+        <div style="display:flex;flex-direction:column;gap:12px">
+            @if (_assignProduct is not null)
+            {
+                <p><strong>@_assignProduct.Name</strong> will be added as a separate job line item. Job-specific quantities and prices can be edited in that job.</p>
+            }
+            <div class="lv-row">
+                <input class="lv-input" aria-label="Search jobs" placeholder="Search jobs..." @bind="_jobSearch" />
+                <LvButton Variant="tonal" OnClick="LoadAssignableJobsAsync">Search jobs</LvButton>
+            </div>
+            <select class="lv-input" aria-label="Select job" @bind="_selectedJobId">
+                <option value="">Select a job...</option>
+                @foreach (var job in _assignableJobs)
+                {
+                    <option value="@job.Id">@job.ClientName — @job.Name</option>
+                }
+            </select>
+            @if (!string.IsNullOrWhiteSpace(_assignmentInfo))
+            {
+                <div class="lv-banner-warning">@_assignmentInfo</div>
+            }
+        </div>
+    </ChildContent>
+    <Actions>
+        <LvButton Variant="outlined" OnClick="() => _showAssignModal = false">Cancel</LvButton>
+        <LvButton Loading="_saving" Disabled="@(_selectedJobId is null)" OnClick="AssignProductToJobAsync">Add to Job</LvButton>
     </Actions>
 </LvDialog>
 
 <LvDialog Open="_showCaptureModal" Title="Capture Supplier Page Content" OnClose="() => _showCaptureModal = false">
     <ChildContent>
         <div style="display:flex;flex-direction:column;gap:12px">
+            @if (_integrationStatus is not null)
+            {
+                <p class="lv-banner-warning">@_integrationStatus.StatusSummary</p>
+            }
             <LvTextField Label="Supplier Page URL" Required="true" Value="@_capUrl" ValueChanged="v => _capUrl = v ?? string.Empty" Placeholder="https://supplier.example/product" />
+            <LvTextField Label="Extraction prompt (optional)" Value="@_capPrompt" ValueChanged="v => _capPrompt = v ?? string.Empty" Placeholder="e.g. Get the current price, product image URLs, and a concise description" />
             <LvTextField Label="Copied Page Text / Specification Blob" Required="true" Multiline="true" Rows="5" Value="@_capText" ValueChanged="v => _capText = v ?? string.Empty" />
             <label class="lv-row" style="font-size:0.86rem">
                 <input type="checkbox" @bind="_capConsent" />
-                I confirm this content is user-selected and contains no supplier login credentials or cookies.
+                I selected this content and confirmed it contains no supplier credentials, cookies, or unrelated private data.
             </label>
+            @if (_integrationStatus?.GeminiConfigured == true)
+            {
+                <label class="lv-row" style="font-size:0.86rem">
+                    <input type="checkbox" @bind="_capUseGemini" disabled="@(!_integrationStatus.GeminiExtractionReady)" />
+                    Use Google Gemini (@_integrationStatus.GeminiModel) to extract suggestions.
+                </label>
+                @if (_capUseGemini)
+                {
+                    <label class="lv-row" style="font-size:0.86rem">
+                        <input type="checkbox" @bind="_capGeminiConsent" />
+                        I explicitly approve sending this selected page text and prompt to Google Gemini for extraction. I have reviewed the provider's data-handling terms.
+                    </label>
+                }
+            }
         </div>
     </ChildContent>
     <Actions>
         <LvButton Variant="outlined" OnClick="() => _showCaptureModal = false">Cancel</LvButton>
-        <LvButton Loading="_saving" Disabled="@(!_capConsent || string.IsNullOrWhiteSpace(_capUrl) || string.IsNullOrWhiteSpace(_capText))" OnClick="CapturePageAsync">Extract Draft</LvButton>
+        <LvButton Loading="_saving"
+                  Disabled="@(!_capConsent || (_capUseGemini && !_capGeminiConsent) || string.IsNullOrWhiteSpace(_capUrl) || string.IsNullOrWhiteSpace(_capText))"
+                  OnClick="CapturePageAsync">@(_capUseGemini ? "Queue Gemini Extraction" : "Extract Local Draft")</LvButton>
     </Actions>
 </LvDialog>
 
 @code {
-    private sealed record ExtractedDraft(string? Name, string? SupplierName, long? CandidateRrpCents, string? Currency);
+    private sealed record ExtractedNameValue(string? Label, string? Value);
+    private sealed record ExtractedDraft(
+        string? Name,
+        string? SupplierName,
+        string? Description,
+        long? CandidateRrpCents,
+        string? Currency,
+        List<ExtractedNameValue>? Attributes,
+        List<ExtractedNameValue>? Identifiers,
+        List<string>? ImageUrls);
     private static ExtractedDraft? ParseDraft(string json)
     {
         try { return JsonSerializer.Deserialize<ExtractedDraft>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)); }
@@ -175,11 +259,32 @@
     private string _rrpInput = "0.00";
     private string? _description;
     private string _attributesText = "Colour=Porcelain\nDimensions=W1500 x D400 x H750mm";
+    private string _sourceImageUrlsText = string.Empty;
+    private Guid? _editingProductId;
+    private string? _productConcurrencyToken;
+    private Guid? _primaryImageAssetId;
+    private LlmExtractionDraftDto? _draftBeingReviewed;
+    private string ProductModalTitle => _draftBeingReviewed is not null
+        ? "Review Supplier Draft"
+        : _editingProductId.HasValue ? "Edit Catalog Product" : "Add Catalog Product";
+    private string ProductSaveLabel => _draftBeingReviewed is not null
+        ? "Accept Draft & Create Product"
+        : _editingProductId.HasValue ? "Save Changes" : "Save Product";
 
     private bool _showCaptureModal;
     private string _capUrl = string.Empty;
+    private string _capPrompt = string.Empty;
     private string _capText = string.Empty;
     private bool _capConsent;
+    private bool _capUseGemini;
+    private bool _capGeminiConsent;
+    private IntegrationStatusDto? _integrationStatus;
+    private bool _showAssignModal;
+    private ProductDto? _assignProduct;
+    private List<JobDto> _assignableJobs = [];
+    private Guid? _selectedJobId;
+    private string _jobSearch = string.Empty;
+    private string? _assignmentInfo;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -204,13 +309,85 @@
 
     private void OpenNewProduct()
     {
+        _editingProductId = null;
+        _productConcurrencyToken = null;
+        _primaryImageAssetId = null;
+        _draftBeingReviewed = null;
         _name = string.Empty;
         _supplierName = null;
         _supplierUrl = null;
         _costInput = "0.00";
         _rrpInput = "0.00";
         _description = null;
+        _attributesText = string.Empty;
+        _sourceImageUrlsText = string.Empty;
         _showProductModal = true;
+    }
+
+    private void EditProduct(ProductDto product)
+    {
+        _editingProductId = product.Id;
+        _productConcurrencyToken = product.ConcurrencyToken;
+        _primaryImageAssetId = product.PrimaryImageAssetId;
+        _draftBeingReviewed = null;
+        _name = product.Name;
+        _supplierName = product.SupplierName;
+        _supplierUrl = product.SupplierUrl;
+        _currency = product.Currency;
+        _costInput = ((decimal)product.CostCents / 100m).ToString("F2", CultureInfo.InvariantCulture);
+        _rrpInput = ((decimal)product.RrpCents / 100m).ToString("F2", CultureInfo.InvariantCulture);
+        _description = product.Description;
+        _attributesText = string.Join(Environment.NewLine, product.Attributes.Select(a => $"{a.Label}={a.Value}"));
+        _sourceImageUrlsText = string.Join(Environment.NewLine, product.SourceImageUrls);
+        _showProductModal = true;
+    }
+
+    private void ReviewDraft(LlmExtractionDraftDto draft)
+    {
+        OpenNewProduct();
+        _draftBeingReviewed = draft;
+        var extracted = ParseDraft(draft.ExtractedJson);
+        _name = Limit(extracted?.Name, 200) ?? string.Empty;
+        _supplierName = Limit(extracted?.SupplierName, 200);
+        _supplierUrl = draft.SourceUrl;
+        _currency = extracted?.Currency is { } currency && MoneyCents.SupportedTwoDecimalCurrencies.Contains(currency)
+            ? currency
+            : "AUD";
+        _costInput = "0.00";
+        _rrpInput = extracted?.CandidateRrpCents is >= MoneyCents.MinSafeJsInteger and <= MoneyCents.MaxSafeJsInteger
+            ? ((decimal)extracted.CandidateRrpCents.Value / 100m).ToString("F2", CultureInfo.InvariantCulture)
+            : "0.00";
+        _description = Limit(extracted?.Description, 4000);
+        var extractedAttributes = (extracted?.Attributes ?? []).Concat(extracted?.Identifiers ?? [])
+            .Where(item => !string.IsNullOrWhiteSpace(item.Label) && !string.IsNullOrWhiteSpace(item.Value))
+            .Select(item => new
+            {
+                Label = SingleLine(item.Label!, 100),
+                Value = SingleLine(item.Value!, 500)
+            })
+            .Where(item => item.Label.Length > 0 && item.Value.Length > 0)
+            .GroupBy(item => item.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(25);
+        _attributesText = string.Join(Environment.NewLine, extractedAttributes.Select(item => $"{item.Label}={item.Value}"));
+        _sourceImageUrlsText = string.Join(Environment.NewLine, (extracted?.ImageUrls ?? []).Take(10));
+        _showProductModal = true;
+    }
+
+    private async Task OpenCaptureAsync()
+    {
+        _error = null;
+        var status = await Api.GetAsync<IntegrationStatusDto>("/api/integrations/status");
+        if (!status.IsSuccess)
+        {
+            _error = status.Error;
+            return;
+        }
+
+        _integrationStatus = status.Data;
+        _capUseGemini = false;
+        _capGeminiConsent = false;
+        _showCaptureModal = true;
     }
 
     private async Task SaveProductAsync()
@@ -228,7 +405,7 @@
                 .Select(p => new ProductAttributeDto { Key = p[0].Trim().ToLowerInvariant(), Label = p[0].Trim(), Value = p[1].Trim() })
                 .ToArray();
 
-            var resp = await Api.PostAsync<ProductDto>("/api/products", new UpsertProductRequest
+            var request = new UpsertProductRequest
             {
                 Name = _name,
                 SupplierName = _supplierName,
@@ -238,12 +415,45 @@
                 CostCents = cost.Cents,
                 RrpCents = rrp.Cents,
                 Attributes = attrs,
-                VariantIdentifierKeys = attrs.Select(a => a.Key).ToArray()
-            });
-            if (!resp.IsSuccess) { _error = resp.Error; return; }
-            if (!string.IsNullOrWhiteSpace(resp.Data?.PossibleDuplicateWarning))
+                VariantIdentifierKeys = attrs.Select(a => a.Key).ToArray(),
+                SourceImageUrls = _sourceImageUrlsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                PrimaryImageAssetId = _primaryImageAssetId,
+                ConcurrencyToken = _productConcurrencyToken
+            };
+
+            if (_draftBeingReviewed is not null)
             {
-                _notice = resp.Data.PossibleDuplicateWarning;
+                var accepted = await Api.PostAsync<LlmExtractionDraftDto>(
+                    $"/api/integrations/drafts/{_draftBeingReviewed.Id}/accept",
+                    new AcceptSupplierDraftRequest { ConcurrencyToken = _draftBeingReviewed.ConcurrencyToken, Product = request });
+                if (!accepted.IsSuccess || accepted.Data?.AcceptedProductId is not Guid productId)
+                {
+                    _error = accepted.Error ?? new ApiErrorResponse
+                    {
+                        Code = "LAV-INT-001",
+                        Message = "The accepted product could not be loaded.",
+                        PossibleCause = "Refresh the catalog and check the draft status.",
+                        CorrelationId = "ui"
+                    };
+                    return;
+                }
+                var productResponse = await Api.GetAsync<ProductDto>($"/api/products/{productId}");
+                if (!productResponse.IsSuccess) { _error = productResponse.Error; return; }
+                _notice = $"Product created from the supplier draft. Source image references were retained; no remote image was downloaded.";
+            }
+            else if (_editingProductId.HasValue)
+            {
+                var resp = await Api.PutAsync<ProductDto>($"/api/products/{_editingProductId.Value}", request);
+                if (!resp.IsSuccess) { _error = resp.Error; return; }
+            }
+            else
+            {
+                var resp = await Api.PostAsync<ProductDto>("/api/products", request);
+                if (!resp.IsSuccess) { _error = resp.Error; return; }
+                if (!string.IsNullOrWhiteSpace(resp.Data?.PossibleDuplicateWarning))
+                {
+                    _notice = resp.Data.PossibleDuplicateWarning;
+                }
             }
             _showProductModal = false;
             await LoadAsync();
@@ -262,6 +472,118 @@
         await LoadAsync();
     }
 
+    private async Task OpenAssignProductAsync(ProductDto product)
+    {
+        _error = null;
+        _assignmentInfo = null;
+        _assignProduct = product;
+        _selectedJobId = null;
+        _jobSearch = string.Empty;
+        _showAssignModal = true;
+        await LoadAssignableJobsAsync();
+    }
+
+    private async Task LoadAssignableJobsAsync()
+    {
+        var resp = await Api.GetAsync<PagedResult<JobDto>>(
+            $"/api/jobs?page=1&pageSize=100&search={Uri.EscapeDataString(_jobSearch)}");
+        if (!resp.IsSuccess) { _error = resp.Error; return; }
+        _assignableJobs = resp.Data?.Items.ToList() ?? [];
+    }
+
+    private async Task AssignProductToJobAsync()
+    {
+        if (_assignProduct is null || _selectedJobId is not Guid jobId || _saving) return;
+        _saving = true;
+        _error = null;
+        _assignmentInfo = null;
+        var releaseLock = false;
+        EditLockStatusDto? lease = null;
+        try
+        {
+            var status = await Api.GetAsync<EditLockStatusDto>($"/api/locks/Job/{jobId}");
+            if (!status.IsSuccess || status.Data is null) { _error = status.Error; return; }
+            if (status.Data.IsHeldByCurrentSession)
+            {
+                lease = status.Data;
+            }
+            else
+            {
+                var action = status.Data.IsReservedForCurrentSession ? "/api/locks/claim" : "/api/locks/modify";
+                var lockResponse = await Api.PostAsync<EditLockStatusDto>(action, new EditLockActionRequest
+                {
+                    RecordType = LockableRecordType.Job,
+                    RecordId = jobId
+                });
+                if (!lockResponse.IsSuccess || lockResponse.Data is null) { _error = lockResponse.Error; return; }
+                lease = lockResponse.Data;
+                releaseLock = lease.IsHeldByCurrentSession;
+                if (!lease.IsHeldByCurrentSession || lease.LeaseId is null || lease.FencingVersion is null)
+                {
+                    var position = lease.QueuePosition.HasValue ? $" Queue position: {lease.QueuePosition}." : string.Empty;
+                    _assignmentInfo = $"The job is locked. Your assignment was not created.{position} Open the job to manage the edit queue, then retry.";
+                    return;
+                }
+            }
+
+            if (lease.LeaseId is null || lease.FencingVersion is null)
+            {
+                _assignmentInfo = "An active job edit lock is required. Open the job to acquire one, then retry.";
+                return;
+            }
+
+            var product = _assignProduct;
+            var result = await Api.PostAsync<JobLineItemDto>($"/api/jobs/{jobId}/line-items", new UpsertJobLineItemRequest
+            {
+                ProductId = product.Id,
+                Title = product.Name,
+                Description = product.Description,
+                SourceUrl = product.SupplierUrl,
+                SelectedAttributes = product.Attributes,
+                QuantityMilli = 1000,
+                Unit = "ea",
+                Currency = product.Currency,
+                CostCents = product.CostCents,
+                RrpCents = product.RrpCents,
+                UnitSellPriceCents = product.RrpCents,
+                ImageAssetId = product.PrimaryImageAssetId,
+                LeaseId = lease.LeaseId,
+                FencingVersion = lease.FencingVersion
+            });
+            if (!result.IsSuccess) { _error = result.Error; return; }
+            _showAssignModal = false;
+            _notice = $"Added '{product.Name}' to the selected job. The job line item is independent and can be edited without changing the catalog product.";
+        }
+        finally
+        {
+            if (releaseLock && lease?.LeaseId is Guid leaseId && lease.FencingVersion is long fencingVersion)
+            {
+                var released = await Api.PostAsync<EditLockStatusDto>("/api/locks/release", new EditLockActionRequest
+                {
+                    RecordType = LockableRecordType.Job,
+                    RecordId = jobId,
+                    LeaseId = leaseId,
+                    FencingVersion = fencingVersion
+                });
+                if (!released.IsSuccess)
+                {
+                    _error = released.Error;
+                    if (!_showAssignModal)
+                    {
+                        _notice = "The job line item was added, but the edit lock could not be released. Open the job and release it there.";
+                    }
+                }
+            }
+            _saving = false;
+        }
+    }
+
+    private static string? Limit(string? value, int maxLength)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim().Length <= maxLength ? value.Trim() : value.Trim()[..maxLength];
+
+    private static string SingleLine(string value, int maxLength)
+        => Limit(value.Replace('\r', ' ').Replace('\n', ' '), maxLength) ?? string.Empty;
+
     private async Task CapturePageAsync()
     {
         _saving = true;
@@ -272,15 +594,34 @@
             {
                 SourceUrl = _capUrl,
                 PageTextContent = _capText,
+                Prompt = string.IsNullOrWhiteSpace(_capPrompt) ? null : _capPrompt.Trim(),
+                UseGemini = _capUseGemini,
+                UserConfirmedProviderConsent = _capUseGemini && _capGeminiConsent,
                 UserConfirmedConsent = _capConsent
             });
             if (!resp.IsSuccess) { _error = resp.Error; return; }
+            if (_capUseGemini && resp.Data is not null)
+            {
+                _notice = $"Gemini suggestion ready for review (model: {resp.Data.ModelName}). Verify all details before accepting.";
+            }
+            else
+            {
+                _notice = "Local heuristic draft created; no AI model was used.";
+            }
             _showCaptureModal = false;
             _capUrl = string.Empty;
+            _capPrompt = string.Empty;
             _capText = string.Empty;
             _capConsent = false;
+            _capUseGemini = false;
+            _capGeminiConsent = false;
             await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = new ApiErrorResponse { Code = "LAV-VAL-001", Message = ex.Message, PossibleCause = "Review the supplier content and integration settings.", CorrelationId = "ui" };
         }
         finally { _saving = false; }
     }
+
 }
