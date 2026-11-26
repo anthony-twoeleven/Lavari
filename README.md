@@ -128,6 +128,13 @@ deny reservations. Cancelled requests still count toward the request quota.
 Once execution starts, the full estimate remains reserved, including on an
 ambiguous failure. This does not yet cap provider charges: reviewed,
 model-specific worst-case pricing and execution safeguards are still required.
+Missing variables are seeded from `Lavari:AiBudget` in
+`appsettings.json` (AUD 150/day globally, AUD 150/user/day, up to 150
+requests/user, and AUD 1 reserved per request). Existing application-variable
+values are never overwritten by configuration defaults. These reservation limits do not cap
+actual Gemini billing. To enable Gemini locally, set
+`Lavari:Integrations:Gemini:Enabled` to `true` and store the API key with
+`dotnet user-secrets set "Lavari:Integrations:Gemini:ApiKey" "<key>" --project src\Lavari.Web`.
 
 ## Performance benchmarks
 

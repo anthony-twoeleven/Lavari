@@ -15,6 +15,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -398,8 +399,36 @@ public sealed class PersistenceAndLockingTests : IDisposable
             _time);
 
         var templatesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Templates"));
-        var seeder = new DatabaseSeeder(db, new Pbkdf2PasswordHasher(), fileStore, new TimeOrderedIdGenerator(_time), NullLogger<DatabaseSeeder>.Instance);
+        var budgetConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Lavari:AiBudget:Currency"] = "AUD",
+                ["Lavari:AiBudget:DailyLimitCents"] = "1200",
+                ["Lavari:AiBudget:UserDailyLimitCents"] = "600",
+                ["Lavari:AiBudget:UserDailyRequests"] = "4",
+                ["Lavari:AiBudget:ReservationCents"] = "100"
+            })
+            .Build();
+        var seeder = new DatabaseSeeder(
+            db, new Pbkdf2PasswordHasher(), fileStore, new TimeOrderedIdGenerator(_time),
+            NullLogger<DatabaseSeeder>.Instance, budgetConfiguration);
         await seeder.SeedAsync(true, null, null, templatesDir);
+
+        var budgetVariables = await db.ApplicationVariables.AsNoTracking()
+            .Where(x => x.Key.StartsWith("Ai."))
+            .ToDictionaryAsync(x => x.Key, x => x.Value);
+        Assert.Equal("AUD", budgetVariables["Ai.SpendCurrency"]);
+        Assert.Equal("1200", budgetVariables["Ai.DailyLimitCents"]);
+        Assert.Equal("600", budgetVariables["Ai.UserDailyLimitCents"]);
+        Assert.Equal("4", budgetVariables["Ai.UserDailyRequests"]);
+        Assert.Equal("100", budgetVariables["Ai.ReservationCents"]);
+
+        var userDailyLimit = await db.ApplicationVariables.SingleAsync(x => x.Key == "Ai.UserDailyLimitCents");
+        userDailyLimit.Value = "700";
+        await db.SaveChangesAsync();
+        await seeder.SeedAsync(true, null, null, templatesDir);
+        Assert.Equal("700", (await db.ApplicationVariables.AsNoTracking()
+            .SingleAsync(x => x.Key == "Ai.UserDailyLimitCents")).Value);
 
         var superAdmin = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Email == DatabaseSeeder.DefaultDevSuperAdminEmail);

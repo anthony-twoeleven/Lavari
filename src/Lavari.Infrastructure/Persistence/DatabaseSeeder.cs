@@ -6,6 +6,7 @@ using Lavari.Domain.Security;
 using Lavari.Infrastructure.Persistence.Entities;
 using Lavari.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Lavari.Infrastructure.Persistence;
@@ -24,19 +25,22 @@ public sealed class DatabaseSeeder
     private readonly IPrivateFileStore _fileStore;
     private readonly IIdGenerator _ids;
     private readonly ILogger<DatabaseSeeder> _logger;
+    private readonly IConfiguration? _configuration;
 
     public DatabaseSeeder(
         LavariDbContext db,
         IPasswordHasher passwordHasher,
         IPrivateFileStore fileStore,
         IIdGenerator ids,
-        ILogger<DatabaseSeeder> logger)
+        ILogger<DatabaseSeeder> logger,
+        IConfiguration? configuration = null)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _fileStore = fileStore;
         _ids = ids;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task SeedAsync(
@@ -261,7 +265,12 @@ public sealed class DatabaseSeeder
             ("Finance.PaymentTerms", ApplicationVariableValueType.String, "7 day payment terms", "Standard payment terms line."),
             ("Time.DefaultJobTimeZone", ApplicationVariableValueType.String, "Australia/Sydney", "Default IANA time zone for new jobs."),
             ("Lock.LeaseDurationSeconds", ApplicationVariableValueType.Int, "300", "Exclusive Modify edit lease duration in seconds."),
-            ("Lock.ReservationClaimSeconds", ApplicationVariableValueType.Int, "120", "Queued editor turn claim reservation window in seconds.")
+            ("Lock.ReservationClaimSeconds", ApplicationVariableValueType.Int, "120", "Queued editor turn claim reservation window in seconds."),
+            ("Ai.SpendCurrency", ApplicationVariableValueType.String, GetAiBudgetDefault("Currency", "AUD"), "Currency for daily AI spend reservations."),
+            ("Ai.DailyLimitCents", ApplicationVariableValueType.Int, GetAiBudgetDefault("DailyLimitCents", "15000"), "Maximum daily AI reservation amount in cents across all users."),
+            ("Ai.UserDailyLimitCents", ApplicationVariableValueType.Int, GetAiBudgetDefault("UserDailyLimitCents", "15000"), "Maximum daily AI reservation amount in cents per user."),
+            ("Ai.UserDailyRequests", ApplicationVariableValueType.Int, GetAiBudgetDefault("UserDailyRequests", "150"), "Maximum AI requests per user per UTC day."),
+            ("Ai.ReservationCents", ApplicationVariableValueType.Int, GetAiBudgetDefault("ReservationCents", "100"), "Amount in cents reserved for each AI request.")
         };
 
         var existingKeys = await _db.ApplicationVariables
@@ -293,6 +302,9 @@ public sealed class DatabaseSeeder
             await _db.SaveChangesAsync(ct);
         }
     }
+
+    private string GetAiBudgetDefault(string key, string fallback)
+        => _configuration?[$"Lavari:AiBudget:{key}"] ?? fallback;
 
     private async Task SeedErrorCodeCatalogAsync(CancellationToken ct)
     {

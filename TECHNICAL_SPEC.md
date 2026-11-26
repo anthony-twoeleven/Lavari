@@ -1231,6 +1231,9 @@ provider input/output and review-only results. The provider call runs directly
 in the API request after reservation and authorization; the reservation's full
 estimate remains charged once execution starts, even if the outcome is
 uncertain. Configuration alone does not authorize or send a provider request.
+Initial AI reservation limits are seeded from deployment configuration only
+when their application variables do not already exist; subsequent administrator
+values remain authoritative.
 The reservation ledger does not itself
 enforce actual provider charges; a reviewed model-specific price cap and
 operational recovery remain required.
