@@ -1290,7 +1290,16 @@ reproduce protected branding or assets without permission. Deliver components
 incrementally as needed rather than attempting to recreate all of Material 3.
 
 Use `prefers-color-scheme` and respond to preference changes for light and
-dark tokens; maintain contrast and accessibility in both themes. Shared form
+dark tokens; maintain contrast and accessibility in both themes. Account
+appearance settings offer System, Light and Dark modes and curated highlight
+swatches, with coordinated light and dark semantic palettes. Store settings
+per user, default to System and lavender, and require the registered account
+appearance Read/Alter permission for self-service reads/updates. Persist and
+audit updates with optimistic concurrency; never use this grant to edit
+another user's profile or permissions. Preview is local until saved, and
+cancel or a failed save restores the saved appearance. Existing roles do not
+automatically gain the new grant; an authorized administrator must assign it.
+Shared form
 components validate all required inputs before submission and the API repeats
 validation. Define dirty as a value comparison with the initial form snapshot:
 for create, the baseline is the initialized draft; for edit, it is the last

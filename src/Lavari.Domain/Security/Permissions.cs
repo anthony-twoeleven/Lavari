@@ -33,6 +33,7 @@ public static class ModuleKeys
     public const string RolesAndPermissions = "roles_and_permissions";
     public const string ApplicationVariables = "application_variables";
     public const string OperationalErrors = "operational_errors";
+    public const string AccountAppearance = "account_appearance";
 
     public static readonly FrozenSet<string> All = new[]
     {
@@ -56,7 +57,8 @@ public static class ModuleKeys
         Users,
         RolesAndPermissions,
         ApplicationVariables,
-        OperationalErrors
+        OperationalErrors,
+        AccountAppearance
     }.ToFrozenSet(StringComparer.Ordinal);
 }
 
@@ -92,7 +94,8 @@ public static class PermissionRegistry
         new(ModuleKeys.Users, "Users", "Administration"),
         new(ModuleKeys.RolesAndPermissions, "Roles & Permissions", "Administration"),
         new(ModuleKeys.ApplicationVariables, "Application Variables", "Administration"),
-        new(ModuleKeys.OperationalErrors, "Operational Errors", "Administration")
+        new(ModuleKeys.OperationalErrors, "Operational Errors", "Administration"),
+        new(ModuleKeys.AccountAppearance, "Account Appearance", "Account")
     ];
 
     public static bool IsRegistered(string? moduleKey)

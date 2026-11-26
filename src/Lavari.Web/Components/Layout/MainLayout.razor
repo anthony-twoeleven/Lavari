@@ -4,6 +4,8 @@
 @inject AppSessionState AppState
 @inject IFormattingService Formatting
 @inject NavigationManager Nav
+@inject Microsoft.JSInterop.IJSRuntime JS
+@using Microsoft.JSInterop
 
 @if (!AppState.IsInitialized)
 {
@@ -20,49 +22,31 @@ else if (!AppState.IsAuthenticated)
 }
 else
 {
-    <div class="lv-shell">
-        <nav class="lv-rail" aria-label="Primary navigation">
+    <a class="lv-skip-link" href="#main-content">Skip to content</a>
+    <div class="lv-shell @(_compact ? "lv-shell-compact" : "")">
+        <aside class="lv-rail">
+            <button type="button" class="lv-btn lv-btn-outlined lv-nav-toggle"
+                    aria-label="@(_compact ? "Expand navigation" : "Collapse navigation")"
+                    aria-expanded="@(!_compact ? "true" : "false")" @onclick="() => _compact = !_compact">
+                <span aria-hidden="true">&#9776;</span>
+            </button>
             <div class="lv-brand">
                 <div class="lv-brand-title">LAVARI</div>
                 <div class="lv-brand-sub">Interior Design</div>
             </div>
 
-            <NavLink class="lv-nav-link" href="" Match="NavLinkMatch.All">Dashboard</NavLink>
-            @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Read) || AppState.Can(ModuleKeys.Jobs, AccessLevel.Read))
-            {
-                <NavLink class="lv-nav-link" href="clients">Clients &amp; Jobs</NavLink>
-            }
-            @if (AppState.Can(ModuleKeys.ProductCatalog, AccessLevel.Read))
-            {
-                <NavLink class="lv-nav-link" href="products">Product Catalog</NavLink>
-            }
-            @if (AppState.Can(ModuleKeys.ImageLibrary, AccessLevel.Read))
-            {
-                <NavLink class="lv-nav-link" href="images">Image Library</NavLink>
-            }
-            @if (AppState.Can(ModuleKeys.FinancialForecasting, AccessLevel.Read))
-            {
-                <NavLink class="lv-nav-link" href="forecasting">Forecasting</NavLink>
-            }
-            @if (AppState.Can(ModuleKeys.Users, AccessLevel.Read) || AppState.Can(ModuleKeys.RolesAndPermissions, AccessLevel.Read) || AppState.Can(ModuleKeys.ApplicationVariables, AccessLevel.Read))
-            {
-                <NavLink class="lv-nav-link" href="admin">Administration</NavLink>
-            }
+            <StudioNavigation />
 
-            <div style="margin-top:auto;padding-top:16px;border-top:1px solid var(--md-sys-color-outline-variant);font-size:0.8rem;color:var(--md-sys-color-on-surface-variant)">
-                <div><strong>@AppState.Session!.DisplayName</strong></div>
-                <div>@AppState.Session.Email</div>
-                <div style="margin-top:6px">
-                    <LvBadge Tone="primary">@(AppState.Session.IsFullAccess ? "Full Access" : string.Join(", ", AppState.Session.Roles))</LvBadge>
-                </div>
-                <div style="margin-top:10px">
-                    <LvButton Variant="outlined" Small="true" OnClick="SignOutAsync">Sign Out</LvButton>
-                </div>
+            <div class="lv-rail-account">
+                <strong>@AppState.Session!.DisplayName</strong>
+                <LvButton Variant="outlined" Small="true" OnClick="SignOutAsync">Sign out</LvButton>
             </div>
-        </nav>
+        </aside>
 
         <div class="lv-main">
             <header class="lv-topbar">
+                <button type="button" class="lv-btn lv-btn-outlined lv-mobile-menu" aria-label="Open navigation"
+                        aria-haspopup="dialog" @onclick="OpenMenuAsync"><span aria-hidden="true">&#9776;</span></button>
                 <div class="lv-row">
                     @if (AppState.ActiveTimers.Count > 0)
                     {
@@ -73,13 +57,16 @@ else
                             </a>
                         }
                     }
-                    else
-                    {
-                        <span style="font-size:0.84rem;color:var(--md-sys-color-on-surface-variant)">
-                            Local Zone: @(AppState.BrowserTimeZone ?? "Unavailable")
-                        </span>
-                    }
                 </div>
+
+                <dialog @ref="_mobileMenu" class="lv-mobile-drawer" aria-label="Main menu">
+                    <div class="lv-row lv-card-header">
+                        <strong>Lavari</strong>
+                        <LvButton Variant="outlined" Small="true" OnClick="CloseMenuAsync">Close menu</LvButton>
+                    </div>
+                    <StudioNavigation OnNavigate="CloseMenuAsync" />
+                    <LvButton Variant="outlined" OnClick="SignOutAsync">Sign Out</LvButton>
+                </dialog>
 
                 <div class="lv-row">
                     <LvButton Variant="tonal" Small="true" OnClick="ToggleNotificationsAsync">
@@ -88,7 +75,8 @@ else
                 </div>
             </header>
 
-            <main class="lv-content">
+            <main id="main-content" class="lv-content" tabindex="-1">
+                <LvErrorBanner Error="_appearanceError" />
                 @Body
             </main>
         </div>
@@ -129,6 +117,12 @@ else
 
 @code {
     private bool _showNotifications;
+    private bool _compact;
+    private ApiErrorResponse? _appearanceError;
+    private ElementReference _mobileMenu;
+
+    private Task OpenMenuAsync() => JS.InvokeVoidAsync("lavariInterop.openDialog", _mobileMenu).AsTask();
+    private Task CloseMenuAsync() => JS.InvokeVoidAsync("lavariInterop.closeDialog", _mobileMenu).AsTask();
 
     protected override void OnInitialized()
     {
@@ -146,16 +140,30 @@ else
             await Api.SetEditingSessionAsync(me.Data.EditingSessionId);
             await Api.RefreshCsrfTokenAsync();
             AppState.SetSession(me.Data, tz);
+            await LoadAppearanceAsync();
             await RefreshHeaderDataAsync();
         }
+
         else
         {
+            await Api.SetAppearanceAsync("system", "lavender");
             AppState.SetSession(null, tz);
             if (!Nav.Uri.EndsWith("/login", StringComparison.OrdinalIgnoreCase))
             {
                 Nav.NavigateTo("/login");
             }
         }
+    }
+
+    private async Task LoadAppearanceAsync()
+    {
+        await Api.SetAppearanceAsync("system", "lavender");
+        if (!AppState.Can(ModuleKeys.AccountAppearance, AccessLevel.Read)) return;
+        var result = await Api.GetAsync<AppearanceDto>("/api/account/appearance");
+        if (result.IsSuccess && result.Data is not null)
+            await Api.SetAppearanceAsync(result.Data.Mode, result.Data.Color);
+        else
+            _appearanceError = result.Error;
     }
 
     private async Task RefreshHeaderDataAsync()
@@ -191,6 +199,7 @@ else
     private async Task SignOutAsync()
     {
         await Api.PostAsync<object?>("/api/auth/logout");
+        await Api.SetAppearanceAsync("system", "lavender");
         AppState.Clear();
         Nav.NavigateTo("/login");
     }

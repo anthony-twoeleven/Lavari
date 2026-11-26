@@ -19,6 +19,7 @@ public sealed class LavariBrowserApiClient
     public ValueTask<string?> GetBrowserTimeZoneAsync() => _js.InvokeAsync<string?>("lavariInterop.getBrowserTimeZone");
     public ValueTask DownloadUrlAsync(string url) => _js.InvokeVoidAsync("lavariInterop.downloadUrl", url);
     public ValueTask SetDirtyGuardAsync(bool isDirty) => _js.InvokeVoidAsync("lavariInterop.setDirtyGuard", isDirty);
+    public ValueTask SetAppearanceAsync(string mode, string color) => _js.InvokeVoidAsync("lavariInterop.setAppearance", mode, color);
 
     public async Task RefreshCsrfTokenAsync()
     {
@@ -67,10 +68,19 @@ public sealed class LavariBrowserApiClient
         return ParseResponse<T>(jsResp);
     }
 
+    public async Task<ApiCallResult<T>> UploadReceiptPhotoAsync<T>(string url, Dictionary<string, string?> fields)
+    {
+        var response = await _js.InvokeAsync<JsFetchResponse>("lavariInterop.uploadReceiptPhoto", url, fields);
+        return ParseResponse<T>(response);
+    }
+
     private async Task<ApiCallResult<T>> SendAsync<T>(string method, string url, object? body)
     {
         var bodyJson = body is null ? null : JsonSerializer.Serialize(body, JsonOpts);
-        var jsResp = await _js.InvokeAsync<JsFetchResponse>("lavariInterop.fetchJson", method, url, bodyJson);
+        await using var reference = await _js.InvokeAsync<IJSStreamReference>("lavariInterop.fetchJson", method, url, bodyJson);
+        await using var stream = await reference.OpenReadStreamAsync(16 * 1024 * 1024);
+        var jsResp = await JsonSerializer.DeserializeAsync<JsFetchResponse>(stream, JsonOpts)
+            ?? throw new JsonException("Missing browser API response.");
         return ParseResponse<T>(jsResp);
     }
 

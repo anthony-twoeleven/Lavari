@@ -14,6 +14,8 @@ public sealed class UserEntity : AuditableSoftDeletableEntity
 
     public bool IsActive { get; set; } = true;
     public bool IsSystemPrincipal { get; set; }
+    public string AppearanceMode { get; set; } = "system";
+    public string AppearanceColor { get; set; } = "lavender";
     public List<UserRoleEntity> UserRoles { get; set; } = [];
 }
 

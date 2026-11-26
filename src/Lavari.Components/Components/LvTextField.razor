@@ -14,6 +14,8 @@
                   placeholder="@Placeholder"
                   disabled="@Disabled"
                   required="@Required"
+                  aria-invalid="@(!string.IsNullOrWhiteSpace(ErrorText) ? "true" : null)"
+                  aria-describedby="@(!string.IsNullOrWhiteSpace(ErrorText) ? _errorId : null)"
                   value="@Value"
                   @oninput="HandleInput"></textarea>
     }
@@ -25,17 +27,20 @@
                placeholder="@Placeholder"
                disabled="@Disabled"
                required="@Required"
+               aria-invalid="@(!string.IsNullOrWhiteSpace(ErrorText) ? "true" : null)"
+               aria-describedby="@(!string.IsNullOrWhiteSpace(ErrorText) ? _errorId : null)"
                value="@Value"
                @oninput="HandleInput" />
     }
     @if (!string.IsNullOrWhiteSpace(ErrorText))
     {
-        <span class="lv-field-error" role="alert">@ErrorText</span>
+        <span id="@_errorId" class="lv-field-error" role="alert">@ErrorText</span>
     }
 </div>
 
 @code {
     private readonly string _id = $"lv-f-{Guid.NewGuid():N}";
+    private readonly string _errorId = $"lv-error-{Guid.NewGuid():N}";
 
     [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
     [Parameter] public string? Value { get; set; }

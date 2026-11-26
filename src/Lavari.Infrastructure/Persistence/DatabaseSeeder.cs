@@ -95,7 +95,7 @@ public sealed class DatabaseSeeder
                 ModuleKeys.TimeTracking, ModuleKeys.ProductCatalog, ModuleKeys.JobLineItems,
                 ModuleKeys.ImageLibrary, ModuleKeys.MoodBoards, ModuleKeys.Quotes, ModuleKeys.Invoices,
                 ModuleKeys.Procurement, ModuleKeys.Receipts, ModuleKeys.SupplierCapture,
-                ModuleKeys.GmailConnections, ModuleKeys.FinancialForecasting
+                ModuleKeys.GmailConnections, ModuleKeys.FinancialForecasting, ModuleKeys.AccountAppearance
             };
 
             foreach (var mod in designerModules)
@@ -141,6 +141,14 @@ public sealed class DatabaseSeeder
                     AccessLevel = AccessLevel.Read
                 });
             }
+
+            _db.RolePermissions.Add(new RolePermissionEntity
+            {
+                Id = _ids.NewId(),
+                RoleId = readOnlyRole.Id,
+                ModuleKey = ModuleKeys.AccountAppearance,
+                AccessLevel = AccessLevel.Alter
+            });
 
             await _db.SaveChangesAsync(ct);
         }

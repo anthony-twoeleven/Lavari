@@ -15,7 +15,7 @@
             <label class="lv-label">End Date</label>
             <input class="lv-input" type="date" @bind="_endDate" />
         </div>
-        <LvTextField Label="Reporting Time Zone" Value="@_tz" ValueChanged="v => _tz = v ?? string.Empty" />
+        <TimeZoneSelect Label="Reporting time zone" @bind-Value="_tz" Disabled="_loading" />
         <LvTextField Label="Currency" Value="@_currency" ValueChanged="v => _currency = v ?? string.Empty" />
     </div>
     <div style="margin-top:14px">

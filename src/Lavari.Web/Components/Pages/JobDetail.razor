@@ -3,6 +3,8 @@
 @inject LavariBrowserApiClient Api
 @inject AppSessionState AppState
 @inject IFormattingService Formatting
+@inject Microsoft.JSInterop.IJSRuntime JS
+@using Microsoft.JSInterop
 
 @if (_job is null && _loading)
 {
@@ -20,8 +22,6 @@ else
             <h1 style="margin:2px 0 0;font-size:1.5rem">@_job.Name</h1>
             <div class="lv-row" style="margin-top:6px">
                 <LvBadge Tone="primary">@_job.Status</LvBadge>
-                <LvBadge>Zone: @_job.TimeZoneIana</LvBadge>
-                <LvBadge>Currency: @_job.DefaultCurrency</LvBadge>
                 @{
                     var updatedFmt = Formatting.FormatDateTime(_job.UpdatedAtUtc, _job.TimeZoneIana, AppState.BrowserTimeZone);
                 }
@@ -72,23 +72,35 @@ else
         <div class="lv-banner-success">@_notice</div>
     }
 
-    <div class="lv-tabs">
-        <LvButton Variant='@(_tab == "overview" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("overview")'>Overview</LvButton>
-        <LvButton Variant='@(_tab == "time" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("time")'>Time Tracker (@_timeEntries.Count)</LvButton>
-        <LvButton Variant='@(_tab == "dates" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("dates")'>Dates &amp; Milestones (@_dates.Count)</LvButton>
-        <LvButton Variant='@(_tab == "items" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("items")'>Line Items (@_lineItems.Count)</LvButton>
-        <LvButton Variant='@(_tab == "moodboards" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("moodboards")'>Mood Boards (@_moodBoards.Count)</LvButton>
-        <LvButton Variant='@(_tab == "finance" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("finance")'>Quotes &amp; Invoices (@_documents.Count)</LvButton>
-        <LvButton Variant='@(_tab == "procurement" ? "filled" : "outlined")' Small="true" OnClick='() => SwitchTabAsync("procurement")'>Procurement &amp; Receipts</LvButton>
+    <div class="lv-tabs" role="group" aria-label="Job sections">
+        <LvButton Variant='@(_tab == "overview" ? "filled" : "outlined")' Pressed='@(_tab == "overview")' Small="true" OnClick='() => SwitchTabAsync("overview")'>Overview</LvButton>
+        @if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "time" ? "filled" : "outlined")' Pressed='@(_tab == "time")' Small="true" OnClick='() => SwitchTabAsync("time")'>Time</LvButton> }
+        @if (AppState.Can(ModuleKeys.JobDates, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "dates" ? "filled" : "outlined")' Pressed='@(_tab == "dates")' Small="true" OnClick='() => SwitchTabAsync("dates")'>Dates</LvButton> }
+        @if (AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "items" ? "filled" : "outlined")' Pressed='@(_tab == "items")' Small="true" OnClick='() => SwitchTabAsync("items")'>Line items</LvButton> }
+        @if (AppState.Can(ModuleKeys.MoodBoards, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "moodboards" ? "filled" : "outlined")' Pressed='@(_tab == "moodboards")' Small="true" OnClick='() => SwitchTabAsync("moodboards")'>Mood boards</LvButton> }
+        @if (AppState.Can(ModuleKeys.Quotes, AccessLevel.Read) || AppState.Can(ModuleKeys.Invoices, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "finance" ? "filled" : "outlined")' Pressed='@(_tab == "finance")' Small="true" OnClick='() => SwitchTabAsync("finance")'>Quotes &amp; invoices</LvButton> }
+        @if (AppState.Can(ModuleKeys.Procurement, AccessLevel.Read) || AppState.Can(ModuleKeys.Receipts, AccessLevel.Read))
+        { <LvButton Variant='@(_tab == "procurement" ? "filled" : "outlined")' Pressed='@(_tab == "procurement")' Small="true" OnClick='() => SwitchTabAsync("procurement")'>Procurement &amp; receipts</LvButton> }
     </div>
 
-    @if (_tab == "overview")
+    @if (_tabLoading)
     {
-        <LvCard Title="Job Details" Subtitle="@(CanEditJob ? "You hold the exclusive Modify lock." : "Read-only — click Modify Job above to edit.")">
+        <p role="status">Loading section...</p>
+    }
+    else if (_tab == "overview")
+    {
+        <LvCard Title="Job details">
+            @if (CanEditJob)
+            {
             <div class="lv-grid-2">
                 <LvTextField Label="Job Name" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.Name" ValueChanged="v => _jobDraft.Name = v ?? string.Empty" />
                 <LvTextField Label="Status" Disabled="@(!CanEditJob)" Value="@_jobDraft.Status" ValueChanged="v => _jobDraft.Status = v ?? string.Empty" />
-                <LvTextField Label="IANA Time Zone" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.TimeZoneIana" ValueChanged="v => _jobDraft.TimeZoneIana = v ?? string.Empty" />
+                <TimeZoneSelect @bind-Value="_jobDraft.TimeZoneIana" Disabled="@(!CanEditJob || _saving)" />
                 <LvTextField Label="Default Currency" Required="true" Disabled="@(!CanEditJob)" Value="@_jobDraft.DefaultCurrency" ValueChanged="v => _jobDraft.DefaultCurrency = v ?? string.Empty" />
                 <LvTextField Label="PO Number" Disabled="@(!CanEditJob)" Value="@_jobDraft.PoNumber" ValueChanged="v => _jobDraft.PoNumber = v" />
                 <LvTextField Label="Hourly Rate (e.g. 165.00)" Disabled="@(!CanEditJob)" Value="@_jobDraft.HourlyRateInput" ValueChanged="v => _jobDraft.HourlyRateInput = v ?? string.Empty" />
@@ -99,15 +111,30 @@ else
             <div class="lv-row" style="margin-top:14px">
                 <LvButton Loading="_saving" Disabled="@(!CanEditJob || !_jobDirty.IsDirty(_jobDraft) || string.IsNullOrWhiteSpace(_jobDraft.Name))" OnClick="SaveJobOverviewAsync">Save Changes</LvButton>
             </div>
+            }
+            else
+            {
+                <dl class="lv-details-grid">
+                    <div><dt>Status</dt><dd>@_job.Status</dd></div>
+                    <div><dt>Job time zone</dt><dd>@_job.TimeZoneIana</dd></div>
+                    <div><dt>Currency</dt><dd>@_job.DefaultCurrency</dd></div>
+                    <div><dt>PO number</dt><dd>@(_job.PoNumber ?? "Not set")</dd></div>
+                    <div><dt>Hourly rate</dt><dd>@Formatting.FormatMoney(new MoneyCents(_job.DefaultHourlyRateCents, _job.DefaultCurrency))</dd></div>
+                    <div><dt>Notes</dt><dd>@(_job.Notes ?? "Not set")</dd></div>
+                </dl>
+            }
         </LvCard>
     }
     else if (_tab == "time")
     {
         <LvCard Title="Job Time Tracker" Subtitle="Start/pause/resume/stop, cancel, Stop At / Resume At corrections, flat &amp; range entries">
             <HeaderActions>
+                @if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Alter))
+                {
                 <LvButton OnClick="() => StartTimerAsync(false)" Loading="_saving">▶ Start Timer</LvButton>
                 <LvButton Variant="tonal" OnClick="() => _showFlatModal = true">+ Flat Entry</LvButton>
                 <LvButton Variant="outlined" OnClick="() => _showRangeModal = true">+ Time Range</LvButton>
+                }
             </HeaderActions>
             <ChildContent>
                 <div class="lv-table-wrap">
@@ -129,19 +156,23 @@ else
                                     <td><strong>@Formatting.FormatDuration(t.LiveDurationSeconds)</strong></td>
                                     <td>@t.Description</td>
                                     <td class="lv-row">
-                                        @if (t.State == "Running")
+                                        @if (t.State == "Running" && AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Alter))
                                         {
                                             <LvButton Variant="tonal" Small="true" OnClick="() => PauseTimerAsync(t)">Pause</LvButton>
-                                            <LvButton Small="true" OnClick="() => StopTimerAsync(t)">Stop</LvButton>
+                                            <LvButton Small="true" OnClick="() => OpenTimeEdit(t, stop: true)">Stop</LvButton>
                                             <LvButton Variant="outlined" Small="true" OnClick='() => OpenAtTimeModal(t, "StopAt")'>Stop At…</LvButton>
                                             <LvButton Variant="danger" Small="true" OnClick="() => CancelTimerAsync(t)">Cancel</LvButton>
                                         }
-                                        else if (t.State == "Paused")
+                                        else if (t.State == "Paused" && AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Alter))
                                         {
                                             <LvButton Small="true" OnClick="() => ResumeTimerAsync(t)">Resume</LvButton>
                                             <LvButton Variant="outlined" Small="true" OnClick='() => OpenAtTimeModal(t, "ResumeAt")'>Resume At…</LvButton>
-                                            <LvButton Variant="tonal" Small="true" OnClick="() => StopTimerAsync(t)">Stop</LvButton>
+                                            <LvButton Variant="tonal" Small="true" OnClick="() => OpenTimeEdit(t, stop: true)">Stop</LvButton>
                                             <LvButton Variant="danger" Small="true" OnClick="() => CancelTimerAsync(t)">Cancel</LvButton>
+                                        }
+                                        @if (t.State == "Stopped" && !t.IsInvoiced && AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Alter))
+                                        {
+                                            <LvButton Variant="tonal" Small="true" OnClick="() => OpenTimeEdit(t, stop: false)">Edit</LvButton>
                                         }
                                         @if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Delete))
                                         {
@@ -187,7 +218,9 @@ else
     {
         <LvCard Title="Job Sourced Line Items" Subtitle="Job-specific furniture &amp; decor requirements with full audit history (requires Modify lock)">
             <HeaderActions>
-                <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showLineItemModal = true">+ Add Line Item</LvButton>
+                <LvButton Small="true" Loading="_saving"
+                          Disabled="@(!AppState.Can(ModuleKeys.Jobs, AccessLevel.Alter) || !AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Alter))"
+                          OnClick="OpenLineItemAsync">+ Add Line Item</LvButton>
             </HeaderActions>
             <ChildContent>
                 <div class="lv-table-wrap">
@@ -318,8 +351,10 @@ else
     {
         <LvCard Title="Quotes &amp; Invoices" Subtitle="Manual lines, job items, billable time or total-only — with Word .docx template &amp; PDF exports">
             <HeaderActions>
-                <LvButton Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Quote)">+ New Quote</LvButton>
-                <LvButton Variant="tonal" Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Invoice)">+ New Invoice</LvButton>
+                @if (AppState.Can(ModuleKeys.Quotes, AccessLevel.Alter))
+                { <LvButton Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Quote)">+ New Quote</LvButton> }
+                @if (AppState.Can(ModuleKeys.Invoices, AccessLevel.Alter))
+                { <LvButton Variant="tonal" Small="true" OnClick="() => OpenNewDocModal(FinancialDocumentType.Invoice)">+ New Invoice</LvButton> }
             </HeaderActions>
             <ChildContent>
                 <div class="lv-table-wrap">
@@ -356,9 +391,12 @@ else
     else if (_tab == "procurement")
     {
         <div class="lv-grid-2">
+            @if (AppState.Can(ModuleKeys.Procurement, AccessLevel.Read))
+            {
             <LvCard Title="Procurement &amp; Orders" Subtitle="Track supplier orders, shipping, installation &amp; payments (requires Modify lock)">
                 <HeaderActions>
-                    <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showProcModal = true">+ Add Order</LvButton>
+                    @if (AppState.Can(ModuleKeys.Procurement, AccessLevel.Alter))
+                    { <LvButton Small="true" Disabled="@(!CanEditJob)" OnClick="() => _showProcModal = true">+ Add Order</LvButton> }
                 </HeaderActions>
                 <ChildContent>
                     @foreach (var p in _procurement)
@@ -373,10 +411,14 @@ else
                     }
                 </ChildContent>
             </LvCard>
+            }
 
+            @if (AppState.Can(ModuleKeys.Receipts, AccessLevel.Read))
+            {
             <LvCard Title="Paper Receipts" Subtitle="Capture with device camera or upload image (stored at ≤1080p)">
                 <HeaderActions>
-                    <LvButton Small="true" OnClick="() => _showReceiptModal = true">+ Capture / Upload Receipt</LvButton>
+                    @if (AppState.Can(ModuleKeys.Receipts, AccessLevel.Alter))
+                    { <LvButton Small="true" OnClick="() => _showReceiptModal = true">+ Capture / Upload Receipt</LvButton> }
                 </HeaderActions>
                 <ChildContent>
                     @foreach (var r in _receipts)
@@ -391,8 +433,29 @@ else
                     }
                 </ChildContent>
             </LvCard>
+            }
         </div>
     }
+
+    <LvDialog Open="@(_timeEditTarget is not null)" Title="@(_stoppingTimer ? "Stop timer" : "Edit recorded time")" OnClose="CloseTimeEdit">
+        <ChildContent>
+            <LvErrorBanner Error="_timeEditError" />
+            <LvTextField Label="Description" Multiline="true" Rows="4" @bind-Value="_timeEditDescription" Disabled="_saving" />
+            @if (!_stoppingTimer)
+            {
+                <div class="lv-grid-2">
+                    <label class="lv-field">Work date<input class="lv-input" type="date" @bind="_timeEditDate" disabled="@_saving" /></label>
+                    <label class="lv-field">Worked duration (seconds)<input class="lv-input" type="number" min="1" @bind="_timeEditSeconds" @bind:event="oninput" disabled="@_saving" /></label>
+                </div>
+                <label class="lv-row"><input type="checkbox" @bind="_timeEditBillable" disabled="@_saving" /> Billable</label>
+                <small>Changing the worked duration keeps the original timer intervals in history.</small>
+            }
+        </ChildContent>
+        <Actions>
+            <LvButton Variant="outlined" Disabled="_saving" OnClick="CloseTimeEdit">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@(!CanSaveTimeEdit)" OnClick="SaveTimeEditAsync">@(_stoppingTimer ? "Stop timer" : "Save changes")</LvButton>
+        </Actions>
+    </LvDialog>
 
     <!-- Multiple Running Timers Modal -->
     <LvDialog Open="_showMultiTimerModal" Title="Another Timer Is Currently Running" OnClose="() => _showMultiTimerModal = false">
@@ -495,6 +558,7 @@ else
     <!-- Add Job Line Item Modal -->
     <LvDialog Open="_showLineItemModal" Title="Add Job Line Item" OnClose="() => _showLineItemModal = false">
         <ChildContent>
+            <LvErrorBanner Error="_error" />
             <div style="display:flex;flex-direction:column;gap:12px">
                 <LvTextField Label="Title" Required="true" Value="@_liTitle" ValueChanged="v => _liTitle = v ?? string.Empty" />
                 <LvTextField Label="Room / Area" Value="@_liRoom" ValueChanged="v => _liRoom = v" />
@@ -574,9 +638,12 @@ else
                         <LvTextField Label="Quantity" InputType="number" Value="@_newDocLineQty" ValueChanged="v => _newDocLineQty = v ?? string.Empty" />
                     </div>
                     <LvTextField Label="Discount Amount (optional)" Value="@_newDocDiscount" ValueChanged="v => _newDocDiscount = v ?? string.Empty" />
-                    <label class="lv-row" style="font-size:0.86rem">
-                        <input type="checkbox" @bind="_newDocIncludeJobItems" /> Include all @_lineItems.Count job line item(s)
-                    </label>
+                    @if (AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Read))
+                    {
+                        <label class="lv-row" style="font-size:0.86rem">
+                            <input type="checkbox" @bind="_newDocIncludeJobItems" disabled="@(!_lineItemsLoaded)" /> Include all @_lineItems.Count job line item(s)
+                        </label>
+                    }
                 }
                 <LvTextField Label="Notes" Multiline="true" Value="@_newDocNotes" ValueChanged="v => _newDocNotes = v" />
             </div>
@@ -604,9 +671,10 @@ else
     </LvDialog>
 
     <!-- Upload Receipt Modal (supports device camera via capture attribute) -->
-    <LvDialog Open="_showReceiptModal" Title="Capture or Upload Paper Receipt" OnClose="() => _showReceiptModal = false">
+    <LvDialog Open="_showReceiptModal" Title="Capture or Upload Paper Receipt" OnClose="CloseReceiptAsync">
         <ChildContent>
             <div style="display:flex;flex-direction:column;gap:12px">
+                <LvErrorBanner Error="_error" />
                 <div class="lv-banner-warning" style="font-size:0.82rem">Receipt photos are resized to at most 1080p; check legibility after upload.</div>
                 <LvTextField Label="Merchant Name" Required="true" Value="@_recMerchant" ValueChanged="v => _recMerchant = v ?? string.Empty" />
                 <div class="lv-grid-2">
@@ -614,14 +682,27 @@ else
                     <LvTextField Label="Amount" Required="true" Value="@_recAmount" ValueChanged="v => _recAmount = v ?? string.Empty" />
                 </div>
                 <div class="lv-field">
-                    <label class="lv-label">Photo (Camera or File) <span class="lv-required">*</span></label>
-                    <InputFile OnChange="OnReceiptFileSelected" accept="image/*" capture="environment" />
+                    <label class="lv-label" for="receipt-photo-file">Choose an existing photo</label>
+                    <InputFile id="receipt-photo-file" OnChange="OnReceiptFileSelected" accept="image/jpeg,image/png,image/webp" disabled="@_saving" />
                 </div>
+                <div class="lv-row">
+                    <LvButton Variant="tonal" Loading="_cameraLoading" Disabled="_saving" OnClick="StartReceiptCameraAsync">@(_cameraPhoto ? "Retake photo" : "Open camera")</LvButton>
+                    @if (_cameraLive)
+                    {
+                        <LvButton Disabled="_saving" OnClick="TakeReceiptPhotoAsync">Take photo</LvButton>
+                    }
+                </div>
+                <video @ref="_receiptVideo" class="lv-receipt-preview" hidden="@(!_cameraLive)" muted playsinline aria-label="Live camera preview"></video>
+                <canvas @ref="_receiptCanvas" class="lv-receipt-preview" hidden="@(!_cameraPhoto)" aria-label="Captured receipt preview"></canvas>
+                @if (_cameraError is not null)
+                {
+                    <p class="lv-banner-warning" role="status">@_cameraError</p>
+                }
             </div>
         </ChildContent>
         <Actions>
-            <LvButton Variant="outlined" OnClick="() => _showReceiptModal = false">Cancel</LvButton>
-            <LvButton Loading="_saving" Disabled="@(_recBytes is null || string.IsNullOrWhiteSpace(_recMerchant))" OnClick="SaveReceiptAsync">Upload Receipt</LvButton>
+            <LvButton Variant="outlined" Disabled="_saving" OnClick="CloseReceiptAsync">Cancel</LvButton>
+            <LvButton Loading="_saving" Disabled="@((_recBytes is null && !_cameraPhoto) || string.IsNullOrWhiteSpace(_recMerchant))" OnClick="SaveReceiptAsync">Upload Receipt</LvButton>
         </Actions>
     </LvDialog>
 }
@@ -645,6 +726,7 @@ else
     private JobDraft _jobDraft = new();
     private readonly LvDirtyTracker<JobDraft> _jobDirty = new();
     private string _tab = "overview";
+    private bool _tabLoading;
     private bool _loading = true;
     private bool _saving;
     private ApiErrorResponse? _error;
@@ -653,6 +735,7 @@ else
     private List<JobDateDto> _dates = [];
     private List<TimeEntryDto> _timeEntries = [];
     private List<JobLineItemDto> _lineItems = [];
+    private bool _lineItemsLoaded;
     private List<MoodBoardDto> _moodBoards = [];
     private MoodBoardDto? _selectedBoard;
     private MoodBoardCanvasDto? _selectedCanvas;
@@ -730,8 +813,15 @@ else
     private byte[]? _recBytes;
     private string _recFileName = "receipt.jpg";
     private string _recContentType = "image/jpeg";
+    private ElementReference _receiptVideo;
+    private ElementReference _receiptCanvas;
+    private bool _cameraLoading;
+    private bool _cameraLive;
+    private bool _cameraPhoto;
+    private string? _cameraError;
+    private int _cameraAttempt;
 
-    private bool CanEditJob => _lockStatus?.IsHeldByCurrentSession == true;
+    private bool CanEditJob => _lockStatus?.IsHeldByCurrentSession == true && AppState.Can(ModuleKeys.Jobs, AccessLevel.Alter);
 
     protected override Task OnParametersSetAsync() => LoadAllAsync();
 
@@ -766,49 +856,93 @@ else
 
     private async Task SwitchTabAsync(string tab)
     {
+        if (_tabLoading || _tab == tab) return;
         _tab = tab;
         _error = null;
         _notice = null;
-        await RefreshTabDataAsync();
+        _tabLoading = true;
+        try { await RefreshTabDataAsync(); }
+        finally { _tabLoading = false; }
     }
 
     private async Task RefreshTabDataAsync()
     {
-        var tResp = await Api.GetAsync<List<TimeEntryDto>>($"/api/jobs/{JobId}/time?includeDeleted=false");
-        if (tResp.IsSuccess && tResp.Data is not null) _timeEntries = tResp.Data;
-
-        var dResp = await Api.GetAsync<List<JobDateDto>>($"/api/jobs/{JobId}/dates");
-        if (dResp.IsSuccess && dResp.Data is not null) _dates = dResp.Data;
-
-        var liResp = await Api.GetAsync<List<JobLineItemDto>>($"/api/jobs/{JobId}/line-items");
-        if (liResp.IsSuccess && liResp.Data is not null) _lineItems = liResp.Data;
-
-        var mbResp = await Api.GetAsync<List<MoodBoardDto>>($"/api/jobs/{JobId}/mood-boards");
-        if (mbResp.IsSuccess && mbResp.Data is not null)
+        if (_tab == "time" && AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Read))
         {
-            _moodBoards = mbResp.Data;
-            if (_selectedBoard is null && _moodBoards.Count > 0) SelectBoard(_moodBoards[0]);
-            else if (_selectedBoard is not null)
+            var response = await Api.GetAsync<List<TimeEntryDto>>($"/api/jobs/{JobId}/time?includeDeleted=false");
+            if (response.IsSuccess && response.Data is not null) _timeEntries = response.Data;
+            else if (!response.IsSuccess) _error = response.Error;
+            var active = await Api.GetAsync<List<TimeEntryDto>>("/api/time/active");
+            if (active.IsSuccess && active.Data is not null) AppState.UpdateActiveTimers(active.Data);
+            else if (!active.IsSuccess) _error ??= active.Error;
+        }
+        else if (_tab == "dates" && AppState.Can(ModuleKeys.JobDates, AccessLevel.Read))
+        {
+            var response = await Api.GetAsync<List<JobDateDto>>($"/api/jobs/{JobId}/dates");
+            if (response.IsSuccess && response.Data is not null) _dates = response.Data;
+            else if (!response.IsSuccess) _error = response.Error;
+        }
+        else if (_tab == "items" && AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Read))
+        {
+            var response = await Api.GetAsync<List<JobLineItemDto>>($"/api/jobs/{JobId}/line-items");
+            if (response.IsSuccess && response.Data is not null) _lineItems = response.Data;
+            else if (!response.IsSuccess) _error = response.Error;
+        }
+        else if (_tab == "moodboards" && AppState.Can(ModuleKeys.MoodBoards, AccessLevel.Read))
+        {
+            var response = await Api.GetAsync<List<MoodBoardDto>>($"/api/jobs/{JobId}/mood-boards");
+            if (response.IsSuccess && response.Data is not null)
             {
-                var updated = _moodBoards.FirstOrDefault(b => b.Id == _selectedBoard.Id);
-                if (updated is not null) SelectBoard(updated);
+                _moodBoards = response.Data;
+                if (_selectedBoard is null && _moodBoards.Count > 0) SelectBoard(_moodBoards[0]);
+                else if (_selectedBoard is not null)
+                {
+                    var updated = _moodBoards.FirstOrDefault(b => b.Id == _selectedBoard.Id);
+                    if (updated is not null) SelectBoard(updated);
+                }
+            }
+            else if (!response.IsSuccess) _error = response.Error;
+            if (AppState.Can(ModuleKeys.ImageLibrary, AccessLevel.Read))
+            {
+                var images = await Api.GetAsync<PagedResult<ImageAssetDto>>("/api/images?page=1&pageSize=30");
+                if (images.IsSuccess && images.Data is not null) _availableImages = images.Data.Items.ToList();
+                else if (!images.IsSuccess) _error ??= images.Error;
             }
         }
-
-        var imgResp = await Api.GetAsync<PagedResult<ImageAssetDto>>("/api/images?page=1&pageSize=30");
-        if (imgResp.IsSuccess && imgResp.Data is not null) _availableImages = imgResp.Data.Items.ToList();
-
-        var docResp = await Api.GetAsync<List<FinancialDocumentDto>>($"/api/jobs/{JobId}/documents");
-        if (docResp.IsSuccess && docResp.Data is not null) _documents = docResp.Data;
-
-        var pResp = await Api.GetAsync<List<ProcurementItemDto>>($"/api/jobs/{JobId}/procurement");
-        if (pResp.IsSuccess && pResp.Data is not null) _procurement = pResp.Data;
-
-        var rResp = await Api.GetAsync<List<ReceiptDto>>($"/api/jobs/{JobId}/receipts");
-        if (rResp.IsSuccess && rResp.Data is not null) _receipts = rResp.Data;
-
-        var actResp = await Api.GetAsync<List<TimeEntryDto>>("/api/time/active");
-        if (actResp.IsSuccess && actResp.Data is not null) AppState.UpdateActiveTimers(actResp.Data);
+        else if (_tab == "finance" && (AppState.Can(ModuleKeys.Quotes, AccessLevel.Read) || AppState.Can(ModuleKeys.Invoices, AccessLevel.Read)))
+        {
+            var response = await Api.GetAsync<List<FinancialDocumentDto>>($"/api/jobs/{JobId}/documents");
+            if (response.IsSuccess && response.Data is not null) _documents = response.Data;
+            else if (!response.IsSuccess) _error = response.Error;
+            _lineItemsLoaded = false;
+            _newDocIncludeJobItems = false;
+            if (AppState.Can(ModuleKeys.JobLineItems, AccessLevel.Read))
+            {
+                var items = await Api.GetAsync<List<JobLineItemDto>>($"/api/jobs/{JobId}/line-items");
+                if (items.IsSuccess && items.Data is not null)
+                {
+                    _lineItems = items.Data;
+                    _lineItemsLoaded = true;
+                    _newDocIncludeJobItems = true;
+                }
+                else if (!items.IsSuccess) _error ??= items.Error;
+            }
+        }
+        else if (_tab == "procurement")
+        {
+            if (AppState.Can(ModuleKeys.Procurement, AccessLevel.Read))
+            {
+                var orders = await Api.GetAsync<List<ProcurementItemDto>>($"/api/jobs/{JobId}/procurement");
+                if (orders.IsSuccess && orders.Data is not null) _procurement = orders.Data;
+                else if (!orders.IsSuccess) _error = orders.Error;
+            }
+            if (AppState.Can(ModuleKeys.Receipts, AccessLevel.Read))
+            {
+                var receipts = await Api.GetAsync<List<ReceiptDto>>($"/api/jobs/{JobId}/receipts");
+                if (receipts.IsSuccess && receipts.Data is not null) _receipts = receipts.Data;
+                else if (!receipts.IsSuccess) _error ??= receipts.Error;
+            }
+        }
     }
 
     // --- Exclusive Modify Lock Actions ---
@@ -913,7 +1047,60 @@ else
 
     private async Task PauseTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/pause?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
     private async Task ResumeTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/resume?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
-    private async Task StopTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/stop?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
+    private TimeEntryDto? _timeEditTarget;
+    private bool _stoppingTimer;
+    private string? _timeEditDescription;
+    private DateOnly _timeEditDate;
+    private long? _timeEditSeconds;
+    private bool _timeEditBillable;
+    private ApiErrorResponse? _timeEditError;
+
+    private bool CanSaveTimeEdit => _timeEditTarget is { } entry && _timeEditDescription?.Length is not > 2000 &&
+        (_stoppingTimer || (_timeEditSeconds > 0 &&
+            (_timeEditSeconds != entry.DurationSeconds || _timeEditDate != entry.WorkDate ||
+             _timeEditBillable != entry.IsBillable || _timeEditDescription != entry.Description)));
+
+    private void OpenTimeEdit(TimeEntryDto entry, bool stop)
+    {
+        _timeEditTarget = entry;
+        _stoppingTimer = stop;
+        _timeEditDescription = entry.Description;
+        _timeEditDate = entry.WorkDate;
+        _timeEditSeconds = entry.DurationSeconds;
+        _timeEditBillable = entry.IsBillable;
+        _timeEditError = null;
+    }
+
+    private void CloseTimeEdit()
+    {
+        if (!_saving) _timeEditTarget = null;
+    }
+
+    private async Task SaveTimeEditAsync()
+    {
+        if (!CanSaveTimeEdit || _saving || _timeEditTarget is not { } entry) return;
+        _saving = true;
+        _timeEditError = null;
+        try
+        {
+            var url = $"/api/time/{entry.Id}";
+            var result = _stoppingTimer
+                ? await Api.PostAsync<TimeEntryDto>($"{url}/stop?token={Uri.EscapeDataString(entry.ConcurrencyToken)}",
+                    new StopTimerRequest { Description = _timeEditDescription })
+                : await Api.PutAsync<TimeEntryDto>(url, new UpdateTimeEntryRequest
+                {
+                    Description = _timeEditDescription,
+                    WorkDate = _timeEditDate,
+                    DurationSeconds = _timeEditSeconds,
+                    IsBillable = _timeEditBillable,
+                    ConcurrencyToken = entry.ConcurrencyToken
+                });
+            if (!result.IsSuccess) { _timeEditError = result.Error; return; }
+            _timeEditTarget = null;
+            await RefreshTabDataAsync();
+        }
+        finally { _saving = false; }
+    }
     private async Task CancelTimerAsync(TimeEntryDto t) { await Api.PostAsync<TimeEntryDto>($"/api/time/{t.Id}/cancel?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
     private async Task DeleteTimeAsync(TimeEntryDto t) { await Api.DeleteAsync($"/api/time/{t.Id}?token={Uri.EscapeDataString(t.ConcurrencyToken)}"); await RefreshTabDataAsync(); }
 
@@ -994,6 +1181,23 @@ else
     }
 
     // --- Dates & Line Items ---
+    private async Task OpenLineItemAsync()
+    {
+        _error = null;
+        var status = await Api.GetAsync<EditLockStatusDto>($"/api/locks/Job/{JobId}");
+        _lockStatus = status.Data;
+        if (!status.IsSuccess)
+        {
+            _error = status.Error;
+            return;
+        }
+        if (!_lockStatus!.IsHeldByCurrentSession && !_lockStatus.IsCurrentSessionQueued)
+        {
+            await RequestModifyAsync();
+        }
+
+        _showLineItemModal = CanEditJob;
+    }
     private async Task SaveDateAsync()
     {
         _saving = true; _error = null;
@@ -1022,10 +1226,15 @@ else
 
     private async Task SaveLineItemAsync()
     {
+        if (_saving || _lockStatus is not { IsHeldByCurrentSession: true, LeaseId: not null, FencingVersion: not null } lease) return;
         _saving = true; _error = null;
         try
         {
-            var qty = decimal.TryParse(_liQty, out var q) ? (long)(q * 1000m) : 1000L;
+            if (!decimal.TryParse(_liQty, out var q) || q <= 0 || q > long.MaxValue / 1000m || decimal.Truncate(q * 1000m) != q * 1000m)
+            {
+                throw new Lavari.Domain.Errors.ValidationServiceException("Enter a positive quantity with at most three decimal places.");
+            }
+            var qty = (long)(q * 1000m);
             var cost = Formatting.ParseMoneyInput(_liCost, _job!.DefaultCurrency);
             var sell = Formatting.ParseMoneyInput(_liSell, _job.DefaultCurrency);
             var resp = await Api.PostAsync<JobLineItemDto>($"/api/jobs/{JobId}/line-items", new UpsertJobLineItemRequest
@@ -1038,12 +1247,26 @@ else
                 CostCents = cost.Cents,
                 RrpCents = sell.Cents,
                 UnitSellPriceCents = sell.Cents,
-                LeaseId = _lockStatus?.LeaseId,
-                FencingVersion = _lockStatus?.FencingVersion
+                LeaseId = lease.LeaseId,
+                FencingVersion = lease.FencingVersion
             });
-            if (!resp.IsSuccess) { _error = resp.Error; return; }
+            if (!resp.IsSuccess)
+            {
+                _error = resp.Error;
+                if (resp.Error?.Code is "LAV-LOCK-001" or "LAV-LOCK-002" or "LAV-LOCK-003")
+                {
+                    var status = await Api.GetAsync<EditLockStatusDto>($"/api/locks/Job/{JobId}");
+                    _lockStatus = status.Data;
+                    _showLineItemModal = false;
+                }
+                return;
+            }
             _showLineItemModal = false; _liTitle = string.Empty;
             await RefreshTabDataAsync();
+        }
+        catch (Lavari.Domain.Errors.ValidationServiceException ex)
+        {
+            _error = new ApiErrorResponse { Code = ex.ErrorCode, Message = ex.UserMessage, PossibleCause = ex.PossibleCause, CorrelationId = "ui" };
         }
         finally { _saving = false; }
     }
@@ -1317,6 +1540,13 @@ else
 
     private async Task OnReceiptFileSelected(InputFileChangeEventArgs e)
     {
+        await ResetReceiptCameraAsync();
+        _recBytes = null;
+        if (e.File.Size > 25 * 1024 * 1024)
+        {
+            _cameraError = "Choose a photo no larger than 25 MB.";
+            return;
+        }
         _recFileName = e.File.Name;
         _recContentType = e.File.ContentType;
         using var ms = new MemoryStream();
@@ -1326,7 +1556,7 @@ else
 
     private async Task SaveReceiptAsync()
     {
-        if (_recBytes is null) return;
+        if ((_recBytes is null && !_cameraPhoto) || _saving) return;
         _saving = true; _error = null;
         try
         {
@@ -1338,13 +1568,72 @@ else
                 ["currency"] = _job.DefaultCurrency,
                 ["amountCents"] = amt.Cents.ToString()
             };
-            var resp = await Api.UploadFileAsync<ReceiptDto>($"/api/jobs/{JobId}/receipts", fields, _recFileName, _recContentType, _recBytes);
+            var url = $"/api/jobs/{JobId}/receipts";
+            var resp = _cameraPhoto
+                ? await Api.UploadReceiptPhotoAsync<ReceiptDto>(url, fields)
+                : await Api.UploadFileAsync<ReceiptDto>(url, fields, _recFileName, _recContentType, _recBytes!);
             if (!resp.IsSuccess) { _error = resp.Error; return; }
+            await ResetReceiptCameraAsync();
             _showReceiptModal = false; _recBytes = null; _recMerchant = string.Empty;
             await RefreshTabDataAsync();
         }
         finally { _saving = false; }
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    private async Task StartReceiptCameraAsync()
+    {
+        var attempt = ++_cameraAttempt;
+        _cameraLoading = true;
+        _cameraPhoto = false;
+        _cameraLive = false;
+        _cameraError = null;
+        try
+        {
+            var error = await JS.InvokeAsync<string?>("lavariInterop.startReceiptCamera", _receiptVideo);
+            if (attempt != _cameraAttempt) return;
+            _cameraError = error;
+            _cameraLive = error is null;
+        }
+        finally
+        {
+            if (attempt == _cameraAttempt) _cameraLoading = false;
+        }
+    }
+
+    private async Task TakeReceiptPhotoAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("lavariInterop.takeReceiptPhoto", _receiptVideo, _receiptCanvas))
+        {
+            if (_showReceiptModal) _cameraError = "The camera is not ready yet. Try again or choose a photo.";
+            return;
+        }
+        if (!_showReceiptModal) return;
+        _cameraPhoto = true;
+        _cameraLive = false;
+        _cameraError = null;
+        _recBytes = null;
+    }
+
+    private async Task CloseReceiptAsync()
+    {
+        if (_saving) return;
+        await ResetReceiptCameraAsync();
+        _recBytes = null;
+        _showReceiptModal = false;
+    }
+
+    private async Task ResetReceiptCameraAsync()
+    {
+        _cameraAttempt++;
+        _cameraLive = _cameraPhoto = _cameraLoading = false;
+        _cameraError = null;
+        await JS.InvokeVoidAsync("lavariInterop.resetReceiptCamera");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_showReceiptModal) return;
+        try { await ResetReceiptCameraAsync(); }
+        catch (JSDisconnectedException) { }
+    }
 }

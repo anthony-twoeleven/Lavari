@@ -285,9 +285,11 @@ public sealed class TimeTrackingService : ITimeTrackingService
         }
     }
 
-    public async Task<TimeEntryDto> StopTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default)
+    public async Task<TimeEntryDto> StopTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default, string? description = null)
     {
+        _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleKeys.TimeTracking, AccessLevel.Alter);
+        var updatedDescription = ValidateDescription(description);
         await WorkerTimerGate.WaitAsync(ct);
         try
         {
@@ -303,6 +305,10 @@ public sealed class TimeTrackingService : ITimeTrackingService
                 CloseRunningInterval(entry, now, now);
             }
             // Normal stop of a paused timer adds no time since its pause!
+            if (description is not null)
+            {
+                entry.Description = updatedDescription;
+            }
             entry.State = "Stopped";
             entry.DurationSeconds = ComputeClosedDurationSeconds(entry);
             entry.OriginalRecordedSeconds = entry.DurationSeconds;
@@ -564,10 +570,17 @@ public sealed class TimeTrackingService : ITimeTrackingService
 
     public async Task<TimeEntryDto> UpdateEntryAsync(Guid timeEntryId, UpdateTimeEntryRequest request, CancellationToken ct = default)
     {
+        _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleKeys.TimeTracking, AccessLevel.Alter);
         var entry = await LoadTimerForMutationAsync(timeEntryId, request.ConcurrencyToken, ct);
 
-        entry.Description = request.Description?.Trim();
+        var isInvoiced = await _db.TimeBillingAllocations.AnyAsync(a => a.TimeEntryId == timeEntryId && a.IsActive, ct);
+        if (entry.State != "Stopped" || isInvoiced)
+        {
+            throw new ConflictServiceException("Only stopped time entries that are not allocated to an invoice can be edited.");
+        }
+
+        entry.Description = ValidateDescription(request.Description);
         entry.IsBillable = request.IsBillable;
         if (request.DurationSeconds.HasValue)
         {
@@ -583,8 +596,16 @@ public sealed class TimeTrackingService : ITimeTrackingService
         }
 
         await _db.SaveChangesAsync(ct);
-        var isInvoiced = await _db.TimeBillingAllocations.AnyAsync(a => a.TimeEntryId == timeEntryId && a.IsActive, ct);
         return Map(entry, entry.Job.Name, entry.Job.TimeZoneIana, isInvoiced, _timeProvider.GetUtcNow());
+    }
+
+    private static string? ValidateDescription(string? description)
+    {
+        if (description?.Length > 2000)
+        {
+            throw new ValidationServiceException("Description must be at most 2,000 characters.");
+        }
+        return description?.Trim();
     }
 
     public async Task SoftDeleteAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default)
@@ -740,7 +761,7 @@ public sealed class TimeTrackingService : ITimeTrackingService
 
     private static long ComputeLiveSeconds(TimeEntryEntity entry, DateTimeOffset now)
     {
-        if (entry.SourceType == TimeEntrySourceType.FlatDuration)
+        if (entry.State == "Stopped" || entry.SourceType == TimeEntrySourceType.FlatDuration)
         {
             return entry.DurationSeconds;
         }

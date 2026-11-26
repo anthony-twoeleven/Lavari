@@ -114,6 +114,54 @@ public sealed class AuthService : IAuthService
     }
 }
 
+public sealed class AccountAppearanceService(
+    LavariDbContext db,
+    ICurrentActorContext actor,
+    IPermissionEvaluator permissions) : IAccountAppearanceService
+{
+    public async Task<AppearanceDto> GetAsync(CancellationToken ct = default)
+    {
+        permissions.Require(ModuleKeys.AccountAppearance, AccessLevel.Read);
+        var user = await CurrentUserAsync(ct);
+        return Map(user);
+    }
+
+    public async Task<AppearanceDto> UpdateAsync(UpdateAppearanceRequest request, CancellationToken ct = default)
+    {
+        permissions.Require(ModuleKeys.AccountAppearance, AccessLevel.Alter);
+        if (request.Mode is not ("system" or "light" or "dark") ||
+            request.Color is not ("lavender" or "blue" or "green" or "rose"))
+        {
+            throw new ValidationServiceException("Choose a supported appearance and highlight color.");
+        }
+
+        var user = await CurrentUserAsync(ct);
+        if (!string.Equals(user.ConcurrencyToken, request.ConcurrencyToken, StringComparison.Ordinal))
+        {
+            throw new ConflictServiceException("Your account changed elsewhere. Reload and try again.", ErrorCodes.ConcurrencyConflict);
+        }
+
+        user.AppearanceMode = request.Mode;
+        user.AppearanceColor = request.Color;
+        await db.SaveChangesAsync(ct);
+        return Map(user);
+    }
+
+    private async Task<UserEntity> CurrentUserAsync(CancellationToken ct)
+    {
+        var id = actor.ActorId ?? throw new UnauthorizedServiceException();
+        return await db.Users.FirstOrDefaultAsync(u => u.Id == id && u.IsActive && !u.IsSystemPrincipal, ct)
+            ?? throw new UnauthorizedServiceException();
+    }
+
+    private static AppearanceDto Map(UserEntity user) => new()
+    {
+        Mode = user.AppearanceMode,
+        Color = user.AppearanceColor,
+        ConcurrencyToken = user.ConcurrencyToken
+    };
+}
+
 public sealed class AdminService : IAdminService
 {
     private readonly LavariDbContext _db;
@@ -597,9 +645,11 @@ public sealed class AdminService : IAdminService
 
     public async Task<PagedResult<AuditEntryDto>> ListAuditEntriesAsync(string? entityType, string? entityId, PagedRequest request, CancellationToken ct = default)
     {
-        _permissions.RequireAuthenticated();
-        var requiredModule = MapEntityTypeToModule(entityType);
-        _permissions.Require(requiredModule, AccessLevel.Read);
+        _permissions.Require(ModuleKeys.RolesAndPermissions, AccessLevel.Read);
+        if (!_actor.IsFullAccess)
+        {
+            throw new ForbiddenServiceException("Full Access is required to view the cross-module audit trail.");
+        }
 
         var query = _db.AuditEntries.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(entityType))
@@ -615,6 +665,7 @@ public sealed class AdminService : IAdminService
         var page = request.NormalizedPage;
         var pageSize = request.NormalizedPageSize;
         var items = await query.OrderByDescending(x => x.OccurredAtUtc)
+            .ThenByDescending(x => x.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(x => new AuditEntryDto
@@ -751,25 +802,6 @@ public sealed class AdminService : IAdminService
                 break;
         }
     }
-
-    private static string MapEntityTypeToModule(string? entityType) => entityType switch
-    {
-        nameof(ClientEntity) => ModuleKeys.Clients,
-        nameof(JobGroupEntity) => ModuleKeys.JobGroups,
-        nameof(JobEntity) => ModuleKeys.Jobs,
-        nameof(JobDateEntity) => ModuleKeys.JobDates,
-        nameof(TimeEntryEntity) or nameof(TimeIntervalEntity) => ModuleKeys.TimeTracking,
-        nameof(ProductEntity) or nameof(ProductVariantEntity) => ModuleKeys.ProductCatalog,
-        nameof(JobLineItemEntity) => ModuleKeys.JobLineItems,
-        nameof(ImageAssetEntity) or nameof(ImageAssociationEntity) => ModuleKeys.ImageLibrary,
-        nameof(MoodBoardEntity) or nameof(MoodBoardCanvasEntity) or nameof(MoodBoardElementEntity) => ModuleKeys.MoodBoards,
-        nameof(FinancialDocumentEntity) or nameof(FinancialDocumentLineEntity) => ModuleKeys.Invoices,
-        nameof(ProcurementItemEntity) or nameof(ProcurementPaymentEntity) => ModuleKeys.Procurement,
-        nameof(ReceiptEntity) => ModuleKeys.Receipts,
-        nameof(ApplicationVariableEntity) => ModuleKeys.ApplicationVariables,
-        nameof(UserEntity) => ModuleKeys.Users,
-        _ => ModuleKeys.RolesAndPermissions
-    };
 
     private static UserAdminDto MapUser(UserEntity u) => new()
     {

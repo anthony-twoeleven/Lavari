@@ -42,17 +42,16 @@ public static class DependencyInjection
         services.AddSingleton<IAppCacheService, AppCacheService>();
         services.AddSingleton<IPrivateFileStore, LocalPrivateFileStore>();
 
-        var dbPath = ResolveDatabasePath(configuration["Lavari:DatabasePath"]);
-        var connectionString = new SqliteConnectionStringBuilder
+        services.AddDbContext<LavariDbContext>((serviceProvider, options) =>
         {
-            DataSource = dbPath,
-            ForeignKeys = true,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
-        }.ToString();
-
-        services.AddDbContext<LavariDbContext>(options =>
-        {
+            var currentConfiguration = serviceProvider.GetRequiredService<IConfiguration>();
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = ResolveDatabasePath(currentConfiguration["Lavari:DatabasePath"]),
+                ForeignKeys = true,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Cache = SqliteCacheMode.Shared
+            }.ToString();
             options.UseSqlite(connectionString, sqlite =>
             {
                 sqlite.MigrationsAssembly(typeof(LavariDbContext).Assembly.FullName);
@@ -63,6 +62,7 @@ public static class DependencyInjection
         services.AddScoped<DatabaseSeeder>();
         services.AddScoped<IEditLockService, EditLockService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAccountAppearanceService, AccountAppearanceService>();
         services.AddScoped<IAdminService, AdminService>();
         services.AddScoped<IClientAndJobService, ClientAndJobService>();
         services.AddScoped<IJobDateService, JobDateService>();

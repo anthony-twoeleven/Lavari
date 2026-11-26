@@ -18,6 +18,18 @@ dependency until the scheduler decision is resolved.
 dotnet run --project src\Lavari.AppHost\Lavari.AppHost.csproj
 ```
 
+For receipt capture, open **Procurement & Receipts → Capture / Upload Receipt
+→ Open camera** and allow camera access. Use HTTPS when testing from a
+phone over the network: plain HTTP to a LAN address does not allow browser
+camera access. You can still choose an existing photo.
+
+The browser companion is not implemented. To test supplier capture, use
+**Product Catalog → Capture Supplier Page**, paste the supplier URL and
+selected product text without credentials, and review the resulting draft.
+To test job insertion, use **Clients & Jobs → Workspace → Line Items →
+Add Line Item**. This requests the job's Modify lock if you don't already hold
+it. Captured drafts do not automatically become job line items.
+
 ## Performance benchmarks
 
 Run the full suite in Release to measure execution time and managed allocations:
@@ -34,6 +46,11 @@ The 25-job search requests page 2 and measures an empty page; the 100-job
 search measures a populated page.
 
 ## Design documents
+
+Appearance settings are available under **Account settings**. System follows
+the device's light/dark preference; highlight colors use curated palettes.
+Administrators must explicitly grant existing roles Account Appearance Read
+or Alter access. Full Access includes the registered module.
 
 - [Application design](APPLICATION_DESIGN.md)
 - [Technical specification](TECHNICAL_SPEC.md)

@@ -3,32 +3,41 @@
 @inject AppSessionState AppState
 @inject IFormattingService Formatting
 
-<h1 style="margin:0;font-size:1.6rem">Studio Dashboard</h1>
+<h1 class="lv-page-title">Dashboard</h1>
 
 <LvErrorBanner Error="_error" />
 
 <div class="lv-grid-4">
-    <LvCard Tonal="true" Title="@_clientsCount.ToString()" Subtitle="Active Clients" />
-    <LvCard Tonal="true" Title="@_jobsCount.ToString()" Subtitle="Active Jobs" />
-    <LvCard Tonal="true" Title="@_productsCount.ToString()" Subtitle="Catalog Products" />
-    <LvCard Tonal="true" Title="@AppState.ActiveTimers.Count.ToString()" Subtitle="Your Active Timers" />
+    @if (_clientsCount.HasValue) { <LvCard Tonal="true" Title="@_clientsCount.Value.ToString()" Subtitle="Active clients" /> }
+    @if (_jobsCount.HasValue) { <LvCard Tonal="true" Title="@_jobsCount.Value.ToString()" Subtitle="Active jobs" /> }
+    @if (_productsCount.HasValue) { <LvCard Tonal="true" Title="@_productsCount.Value.ToString()" Subtitle="Catalog products" /> }
+    @if (AppState.Can(ModuleKeys.TimeTracking, AccessLevel.Read) && AppState.ActiveTimers.Count > 0)
+    { <LvCard Tonal="true" Title="@AppState.ActiveTimers.Count.ToString()" Subtitle="Your active timers" /> }
 </div>
 
-<div class="lv-grid-2">
-    <LvCard Title="Recent Jobs" Subtitle="Open a job to manage dates, timers, line items, mood boards, quotes, invoices and procurement">
+@if (AppState.Can(ModuleKeys.Jobs, AccessLevel.Read))
+{
+    <LvCard Title="Jobs">
         @if (_loading)
         {
             <p><span class="lv-spinner"></span> Loading jobs...</p>
         }
+        else if (!_jobsCount.HasValue)
+        {
+            <p>Jobs could not be loaded.</p>
+        }
         else if (_recentJobs.Count == 0)
         {
-            <p>No jobs yet. Create your first client, job group and job in <a href="/clients">Clients &amp; Jobs</a>.</p>
+            <p>No jobs yet.
+                @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Read))
+                { <a href="/clients">Open clients and jobs</a> }
+            </p>
         }
         else
         {
             <div class="lv-table-wrap">
                 <table class="lv-table">
-                    <thead><tr><th>Job</th><th>Client / Group</th><th>Status</th><th>Zone</th></tr></thead>
+                    <thead><tr><th>Job</th><th>Client / Group</th><th>Status</th></tr></thead>
                     <tbody>
                         @foreach (var j in _recentJobs)
                         {
@@ -36,7 +45,6 @@
                                 <td><a href="/jobs/@j.Id"><strong>@j.Name</strong></a></td>
                                 <td>@j.ClientName / @j.JobGroupName</td>
                                 <td><LvBadge Tone="primary">@j.Status</LvBadge></td>
-                                <td><small>@j.TimeZoneIana</small></td>
                             </tr>
                         }
                     </tbody>
@@ -45,30 +53,14 @@
         }
     </LvCard>
 
-    <LvCard Title="Quick Actions & Studio Status">
-        <div class="lv-row" style="margin-bottom:14px">
-            <a class="lv-btn lv-btn-filled" href="/clients">Clients &amp; Jobs</a>
-            <a class="lv-btn lv-btn-tonal" href="/products">Product Catalog</a>
-            <a class="lv-btn lv-btn-tonal" href="/images">Image Library</a>
-            <a class="lv-btn lv-btn-outlined" href="/forecasting">Forecasting</a>
-            <a class="lv-btn lv-btn-outlined" href="/admin">Admin</a>
-        </div>
-        @if (_integrations is not null)
-        {
-            <div class="lv-banner-warning" style="font-size:0.86rem">
-                <strong>Integrations:</strong> @_integrations.StatusSummary
-            </div>
-        }
-    </LvCard>
-</div>
+}
 
 @code {
     private bool _loading = true;
-    private int _clientsCount;
-    private int _jobsCount;
-    private int _productsCount;
+    private int? _clientsCount;
+    private int? _jobsCount;
+    private int? _productsCount;
     private List<JobDto> _recentJobs = [];
-    private IntegrationStatusDto? _integrations;
     private ApiErrorResponse? _error;
 
     protected override async Task OnInitializedAsync()
@@ -81,6 +73,7 @@
             {
                 var c = await Api.GetAsync<PagedResult<ClientDto>>("/api/clients?page=1&pageSize=1");
                 if (c.IsSuccess && c.Data is not null) _clientsCount = c.Data.TotalCount;
+                else if (!c.IsSuccess) _error = c.Error;
             }
             if (AppState.Can(ModuleKeys.Jobs, AccessLevel.Read))
             {
@@ -99,9 +92,8 @@
             {
                 var p = await Api.GetAsync<PagedResult<ProductDto>>("/api/products?page=1&pageSize=1");
                 if (p.IsSuccess && p.Data is not null) _productsCount = p.Data.TotalCount;
+                else if (!p.IsSuccess) _error ??= p.Error;
             }
-            var integ = await Api.GetAsync<IntegrationStatusDto>("/api/integrations/status");
-            if (integ.IsSuccess) _integrations = integ.Data;
         }
         finally
         {

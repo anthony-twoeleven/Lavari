@@ -201,6 +201,10 @@ system and integration activity, is attributable to a named actor.
   UTC timestamps.
 - Follow the device's light or dark preference, including changes while the
   application is open. Do not rely on color alone to convey state.
+- Account appearance offers System (default), Light and Dark modes and a
+  curated highlight-color palette. Save preferences per user, apply them
+  across devices, and preview changes before saving. Require an explicit
+  account appearance grant; audit and concurrency-check updates.
 - Validate required inputs before a request and display actionable,
   field-specific feedback; the server validates independently.
 - Create and update buttons are disabled until a form differs from its

@@ -138,6 +138,8 @@ public sealed class LavariDbContext : DbContext
             e.Property(x => x.Email).HasMaxLength(256);
             e.Property(x => x.NormalizedEmail).HasMaxLength(256);
             e.Property(x => x.DisplayName).HasMaxLength(200);
+            e.Property(x => x.AppearanceMode).HasMaxLength(16).HasDefaultValue("system");
+            e.Property(x => x.AppearanceColor).HasMaxLength(16).HasDefaultValue("lavender");
         });
 
         modelBuilder.Entity<RoleEntity>(e =>

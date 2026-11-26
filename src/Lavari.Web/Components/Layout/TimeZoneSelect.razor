@@ -1,0 +1,38 @@
+<div class="lv-field">
+    <label class="lv-label" for="@_id">@Label</label>
+    <select id="@_id" class="lv-select" value="@Value" disabled="@Disabled" @onchange="OnChange">
+        @if (!Zones.Contains(Value, StringComparer.Ordinal))
+        {
+            <option value="@Value">@Value</option>
+        }
+        @foreach (var zone in Zones)
+        {
+            <option value="@zone">@zone.Replace('_', ' ')</option>
+        }
+    </select>
+</div>
+
+@code {
+    private readonly string _id = $"zone-{Guid.NewGuid():N}";
+    private static readonly string[] Zones =
+    [
+        "Australia/Sydney", "Australia/Brisbane", "Australia/Melbourne", "Australia/Adelaide",
+        "Australia/Darwin", "Australia/Perth", "Australia/Hobart", "Australia/Broken_Hill",
+        "Australia/Eucla", "Australia/Lord_Howe", "Pacific/Auckland", "Pacific/Chatham",
+        "Pacific/Fiji", "Pacific/Honolulu", "Etc/UTC", "Asia/Singapore", "Asia/Hong_Kong",
+        "Asia/Shanghai", "Asia/Tokyo", "Asia/Seoul", "Asia/Kolkata", "Asia/Dubai",
+        "Europe/London", "Europe/Dublin", "Europe/Paris", "Europe/Berlin", "Europe/Rome",
+        "Europe/Madrid", "Europe/Amsterdam", "Europe/Zurich", "Europe/Athens",
+        "Africa/Johannesburg", "America/New_York", "America/Chicago", "America/Denver",
+        "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "America/Toronto",
+        "America/Vancouver", "America/Mexico_City", "America/Sao_Paulo"
+    ];
+
+    [Parameter] public string Label { get; set; } = "Time zone";
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private Task OnChange(ChangeEventArgs args) =>
+        ValueChanged.InvokeAsync(args.Value?.ToString() ?? Value);
+}

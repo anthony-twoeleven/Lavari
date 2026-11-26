@@ -17,9 +17,6 @@
                 Sign In
             </LvButton>
         </form>
-        <p style="margin-top:16px;font-size:0.8rem;color:var(--md-sys-color-on-surface-variant)">
-            Authentication is required for all studio modules. In development, a SuperAdmin account is seeded automatically.
-        </p>
     </LvCard>
 </div>
 
@@ -44,7 +41,7 @@
 
             var tz = await Api.GetBrowserTimeZoneAsync();
             AppState.SetSession(result.Data, tz);
-            Nav.NavigateTo("/");
+            Nav.NavigateTo("/", forceLoad: true);
         }
         finally
         {

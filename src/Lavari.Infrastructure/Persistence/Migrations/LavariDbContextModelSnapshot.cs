@@ -2690,6 +2690,20 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AppearanceColor")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("lavender");
+
+                    b.Property<string>("AppearanceMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("system");
+
                     b.Property<string>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .IsRequired()

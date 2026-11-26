@@ -1,0 +1,44 @@
+@inject AppSessionState AppState
+
+<nav aria-label="Primary navigation">
+    @foreach (var entry in Entries)
+    {
+        if (entry.Module is null || AppState.Can(entry.Module, AccessLevel.Read) ||
+            (entry.AlternateModule is not null && AppState.Can(entry.AlternateModule, AccessLevel.Read)) ||
+            (entry.Path == "admin" && AppState.Can(ModuleKeys.ApplicationVariables, AccessLevel.Read)))
+        {
+            <NavLink class="lv-nav-link" href="@entry.Path" Match="@entry.Match" title="@entry.Label"
+                     aria-label="@entry.Label" @onclick="OnNavigate">
+                <svg class="lv-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="@entry.Icon" /></svg>
+                <span class="lv-nav-label">@entry.Label</span>
+            </NavLink>
+        }
+    }
+    @if (AppState.Can(ModuleKeys.AccountAppearance, AccessLevel.Read))
+    {
+        <NavLink class="lv-nav-link" href="account" title="Account settings" aria-label="Account settings" @onclick="OnNavigate">
+            <svg class="lv-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21a8 8 0 0 1 16 0z" /></svg>
+            <span class="lv-nav-label">Account settings</span>
+        </NavLink>
+    }
+</nav>
+
+@code {
+    [Parameter] public EventCallback OnNavigate { get; set; }
+
+    private sealed record Entry(string Path, string Label, string Icon, string? Module = null,
+        string? AlternateModule = null, NavLinkMatch Match = NavLinkMatch.Prefix);
+
+    private static readonly Entry[] Entries =
+    [
+        new("", "Dashboard", "M3 11l9-8 9 8v10h-6v-7H9v7H3z", Match: NavLinkMatch.All),
+        new("clients", "Clients & Jobs", "M3 6h7l2 2h9v12H3z", ModuleKeys.Clients, ModuleKeys.Jobs),
+        new("products", "Product Catalog", "M4 4h16v16H4z M4 10h16 M10 10v10", ModuleKeys.ProductCatalog),
+        new("images", "Image Library", "M3 4h18v16H3z M4 17l5-6 4 5 3-3 5 5 M16 8h2", ModuleKeys.ImageLibrary),
+        new("forecasting", "Forecasting", "M3 3v18h18 M6 16l5-6 4 3 6-7", ModuleKeys.FinancialForecasting),
+        new("admin", "Administration", "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z M8 12l3 3 5-5",
+            ModuleKeys.Users, ModuleKeys.RolesAndPermissions)
+    ];
+}

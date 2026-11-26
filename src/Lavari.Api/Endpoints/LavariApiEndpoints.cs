@@ -87,6 +87,9 @@ public static class LavariApiEndpoints
             }).ToArray());
         });
 
+        api.MapGet("/account/appearance", (IAccountAppearanceService svc, CancellationToken ct) => svc.GetAsync(ct));
+        api.MapPut("/account/appearance", (UpdateAppearanceRequest req, IAccountAppearanceService svc, CancellationToken ct) => svc.UpdateAsync(req, ct));
+
         // --- Clients, Job Groups & Jobs ---
         api.MapGet("/clients", (IClientAndJobService svc, int page = 1, int pageSize = 25, string? search = null, bool includeDeleted = false, CancellationToken ct = default) =>
             svc.ListClientsAsync(new PagedRequest { Page = page, PageSize = pageSize, Search = search, IncludeDeleted = includeDeleted }, ct));
@@ -174,7 +177,8 @@ public static class LavariApiEndpoints
         api.MapPost("/time/start", (StartTimerRequest req, ITimeTrackingService svc, CancellationToken ct) => svc.StartTimerAsync(req, ct));
         api.MapPost("/time/{id:guid}/pause", (Guid id, [FromQuery] string token, ITimeTrackingService svc, CancellationToken ct) => svc.PauseTimerAsync(id, token, ct));
         api.MapPost("/time/{id:guid}/resume", (Guid id, [FromQuery] string token, ITimeTrackingService svc, CancellationToken ct) => svc.ResumeTimerAsync(id, token, ct));
-        api.MapPost("/time/{id:guid}/stop", (Guid id, [FromQuery] string token, ITimeTrackingService svc, CancellationToken ct) => svc.StopTimerAsync(id, token, ct));
+        api.MapPost("/time/{id:guid}/stop", (Guid id, [FromQuery] string token, [FromBody] StopTimerRequest? request, ITimeTrackingService svc, CancellationToken ct) =>
+            svc.StopTimerAsync(id, token, ct, request?.Description));
         api.MapPost("/time/{id:guid}/cancel", (Guid id, [FromQuery] string token, ITimeTrackingService svc, CancellationToken ct) => svc.CancelTimerAsync(id, token, ct));
         api.MapPost("/time/{id:guid}/preview-stop-at", (Guid id, [FromQuery] DateTimeOffset effectiveTimeUtc, ITimeTrackingService svc, CancellationToken ct) => svc.PreviewStopAtAsync(id, effectiveTimeUtc, ct));
         api.MapPost("/time/{id:guid}/stop-at", (Guid id, TimerAtTimeRequest req, ITimeTrackingService svc, CancellationToken ct) => svc.StopAtAsync(id, req, ct));

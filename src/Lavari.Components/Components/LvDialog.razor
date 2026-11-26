@@ -1,7 +1,10 @@
+@implements IAsyncDisposable
+@inject Microsoft.JSInterop.IJSRuntime JS
+@using Microsoft.JSInterop
+
 @if (Open)
 {
-    <div class="lv-backdrop" role="presentation" @onkeydown="HandleKeyDown">
-        <div class="lv-dialog" role="dialog" aria-modal="true" aria-labelledby="@_titleId" tabindex="-1">
+        <dialog @ref="_dialog" class="lv-dialog" aria-labelledby="@_titleId" @onkeydown="HandleKeyDown">
             <div class="lv-card-header" style="margin-bottom:0">
                 <h2 id="@_titleId" class="lv-card-title">@Title</h2>
                 @if (Dismissible)
@@ -14,12 +17,13 @@
             {
                 <div class="lv-dialog-actions">@Actions</div>
             }
-        </div>
-    </div>
+        </dialog>
 }
 
 @code {
     private readonly string _titleId = $"lv-dlg-{Guid.NewGuid():N}";
+    private ElementReference _dialog;
+    private bool _shown;
 
     [Parameter] public bool Open { get; set; }
     [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
@@ -28,11 +32,31 @@
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
 
-    private async Task HandleKeyDown(KeyboardEventArgs e)
+    protected override async Task OnParametersSetAsync()
     {
-        if (Dismissible && e.Key == "Escape")
+        if (_shown && !Open)
         {
-            await OnClose.InvokeAsync();
+            await JS.InvokeVoidAsync("lavariInterop.closeDialog", _dialog);
+            _shown = false;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Open && !_shown)
+        {
+            await JS.InvokeVoidAsync("lavariInterop.openDialog", _dialog);
+            _shown = true;
+        }
+    }
+
+    private Task HandleKeyDown(KeyboardEventArgs args) =>
+        Dismissible && args.Key == "Escape" ? OnClose.InvokeAsync() : Task.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_shown) return;
+        try { await JS.InvokeVoidAsync("lavariInterop.closeDialog", _dialog); }
+        catch (JSDisconnectedException) { }
     }
 }

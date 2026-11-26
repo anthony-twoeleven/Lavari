@@ -23,3 +23,17 @@ public sealed record LoginRequest
     public required string Email { get; init; }
     public required string Password { get; init; }
 }
+
+public sealed record AppearanceDto
+{
+    public required string Mode { get; init; }
+    public required string Color { get; init; }
+    public required string ConcurrencyToken { get; init; }
+}
+
+public sealed record UpdateAppearanceRequest
+{
+    public required string Mode { get; init; }
+    public required string Color { get; init; }
+    public required string ConcurrencyToken { get; init; }
+}

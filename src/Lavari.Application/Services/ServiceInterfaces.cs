@@ -13,6 +13,12 @@ public interface IAuthService
     Task<IReadOnlyDictionary<string, AccessLevel>> LoadEffectivePermissionsAsync(Guid userId, CancellationToken ct = default);
 }
 
+public interface IAccountAppearanceService
+{
+    Task<AppearanceDto> GetAsync(CancellationToken ct = default);
+    Task<AppearanceDto> UpdateAsync(UpdateAppearanceRequest request, CancellationToken ct = default);
+}
+
 public interface IAdminService
 {
     Task<PagedResult<UserAdminDto>> ListUsersAsync(PagedRequest request, CancellationToken ct = default);
@@ -75,7 +81,7 @@ public interface ITimeTrackingService
     Task<StartTimerResultDto> StartTimerAsync(StartTimerRequest request, CancellationToken ct = default);
     Task<TimeEntryDto> PauseTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default);
     Task<TimeEntryDto> ResumeTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default);
-    Task<TimeEntryDto> StopTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default);
+    Task<TimeEntryDto> StopTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default, string? description = null);
     Task<TimeEntryDto> CancelTimerAsync(Guid timeEntryId, string concurrencyToken, CancellationToken ct = default);
     Task<TimerAdjustmentPreviewDto> PreviewStopAtAsync(Guid timeEntryId, DateTimeOffset effectiveTimeUtc, CancellationToken ct = default);
     Task<TimeEntryDto> StopAtAsync(Guid timeEntryId, TimerAtTimeRequest request, CancellationToken ct = default);

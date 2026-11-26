@@ -109,6 +109,11 @@ public sealed record CreateRangeTimeEntryRequest
     public bool ConfirmOverlap { get; init; }
 }
 
+public sealed record StopTimerRequest
+{
+    public string? Description { get; init; }
+}
+
 public sealed record UpdateTimeEntryRequest
 {
     public string? Description { get; init; }

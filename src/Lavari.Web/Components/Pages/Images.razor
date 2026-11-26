@@ -5,12 +5,12 @@
 <div class="lv-row" style="justify-content:space-between">
     <h1 style="margin:0;font-size:1.5rem">Image Library</h1>
     <div class="lv-row">
-        <input class="lv-input" style="width:200px" placeholder="Search images..." @bind="_search" />
-        <select class="lv-select" style="width:180px" @bind="_filterClientId">
+        <input class="lv-input" style="width:200px" aria-label="Search images" placeholder="Search images..." @bind="_search" />
+        <select class="lv-select" style="width:180px" aria-label="Filter by client" @bind="_filterClientId">
             <option value="">All Clients</option>
             @foreach (var c in _clients) { <option value="@c.Id">@c.Name</option> }
         </select>
-        <select class="lv-select" style="width:180px" @bind="_filterJobId">
+        <select class="lv-select" style="width:180px" aria-label="Filter by job" @bind="_filterJobId">
             <option value="">All Jobs</option>
             @foreach (var j in _jobs) { <option value="@j.Id">@j.Name</option> }
         </select>
@@ -31,7 +31,7 @@
 <div class="lv-grid-4">
     @foreach (var img in _images)
     {
-        <LvCard Class="lv-card" Title="@img.Title" Subtitle="@($"{img.Width}x{img.Height} • {img.ContentType}")">
+        <LvCard Title="@img.Title">
             <img src="/api/images/@img.Id/content?thumb=true" alt="@img.Title"
                  style="width:100%;height:170px;object-fit:cover;border-radius:8px;margin-bottom:10px;background:var(--md-sys-color-surface-container)" />
             <div class="lv-row" style="margin-bottom:8px">
@@ -43,15 +43,21 @@
                 }
             </div>
             <div class="lv-row">
-                <a class="lv-btn lv-btn-tonal lv-btn-sm" href="/api/images/@img.Id/content" target="_blank">Full (≤1080p)</a>
+                <a class="lv-btn lv-btn-tonal lv-btn-sm" href="/api/images/@img.Id/content" target="_blank" rel="noopener">View image</a>
                 @if (AppState.Can(ModuleKeys.ImageLibrary, AccessLevel.Delete))
                 {
                     <LvButton Variant="outlined" Small="true" OnClick="() => DeleteImageAsync(img)">Delete</LvButton>
                 }
             </div>
+            <details><summary>Image details</summary><small>@img.Width × @img.Height · @img.ContentType</small></details>
         </LvCard>
     }
 </div>
+
+@if (!_loading && _error is null && _images.Count == 0)
+{
+    <p>No images found. Try changing the filters or upload an image.</p>
+}
 
 <LvDialog Open="_showUploadModal" Title="Upload Image to Library" OnClose="() => _showUploadModal = false">
     <ChildContent>
@@ -99,7 +105,7 @@
     private string _search = string.Empty;
     private string _filterClientId = string.Empty;
     private string _filterJobId = string.Empty;
-    private bool _loading;
+    private bool _loading = true;
     private bool _uploading;
     private ApiErrorResponse? _error;
     private string? _uploadNotice;

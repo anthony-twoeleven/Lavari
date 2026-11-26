@@ -2,11 +2,12 @@
 @inject LavariBrowserApiClient Api
 @inject AppSessionState AppState
 @inject IFormattingService Formatting
+@using System.Text.Json
 
 <div class="lv-row" style="justify-content:space-between">
     <h1 style="margin:0;font-size:1.5rem">Global Product Catalog &amp; Supplier Capture</h1>
     <div class="lv-row">
-        <input class="lv-input" style="width:220px" placeholder="Search products..." @bind="_search" />
+        <input class="lv-input" style="width:220px" aria-label="Search products" placeholder="Search products..." @bind="_search" />
         <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>
         @if (AppState.Can(ModuleKeys.SupplierCapture, AccessLevel.Alter))
         {
@@ -26,6 +27,10 @@
 }
 
 <LvCard Title="Catalog Products" Subtitle="Global reusable furniture &amp; decor catalog with flexible per-product attributes">
+    @if (!_loading && _error is null && _products.Count == 0)
+    {
+        <p>No products found. Try another search or add a product.</p>
+    }
     <div class="lv-table-wrap">
         <table class="lv-table">
             <thead><tr><th>Product</th><th>Supplier</th><th>Our Cost</th><th>RRP</th><th>Attributes</th><th></th></tr></thead>
@@ -64,18 +69,39 @@
 
 @if (_drafts.Count > 0)
 {
-    <LvCard Title="Supplier Capture &amp; LLM Extraction Drafts" Subtitle="Untrusted drafts awaiting designer review before saving to catalog">
+    <LvCard Title="Captured drafts" Subtitle="Review these suggestions before manually adding a product.">
         <div class="lv-table-wrap">
             <table class="lv-table">
                 <thead><tr><th>Source URL</th><th>Provider</th><th>Status</th><th>Extracted Draft</th></tr></thead>
                 <tbody>
                     @foreach (var d in _drafts)
                     {
+                        var extracted = ParseDraft(d.ExtractedJson);
                         <tr>
                             <td><small>@d.SourceUrl</small></td>
                             <td><LvBadge>@d.ProviderName</LvBadge></td>
                             <td><LvBadge Tone="warning">@d.Status</LvBadge></td>
-                            <td><code style="font-size:0.78rem">@d.ExtractedJson</code></td>
+                            <td>
+                                @if (extracted is not null)
+                                {
+                                    <div><strong>@extracted.Name</strong></div>
+                                    <div>@extracted.SupplierName</div>
+                                    @if (extracted.CandidateRrpCents is >= MoneyCents.MinSafeJsInteger and <= MoneyCents.MaxSafeJsInteger &&
+                                         extracted.Currency is not null && MoneyCents.SupportedTwoDecimalCurrencies.Contains(extracted.Currency))
+                                    {
+                                        <div>Suggested price: @Formatting.FormatMoney(new MoneyCents(extracted.CandidateRrpCents.Value, extracted.Currency))</div>
+                                    }
+                                    else if (extracted.CandidateRrpCents.HasValue)
+                                    {
+                                        <div>Suggested price could not be displayed; review the original data.</div>
+                                    }
+                                }
+                                else
+                                {
+                                    <span>These extracted details could not be displayed. Review the original data below.</span>
+                                }
+                                <details><summary>Original extracted data</summary><pre class="lv-audit-data">@d.ExtractedJson</pre></details>
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -125,6 +151,13 @@
 </LvDialog>
 
 @code {
+    private sealed record ExtractedDraft(string? Name, string? SupplierName, long? CandidateRrpCents, string? Currency);
+    private static ExtractedDraft? ParseDraft(string json)
+    {
+        try { return JsonSerializer.Deserialize<ExtractedDraft>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)); }
+        catch (JsonException) { return null; }
+    }
+
     private List<ProductDto> _products = [];
     private List<LlmExtractionDraftDto> _drafts = [];
     private string _search = string.Empty;

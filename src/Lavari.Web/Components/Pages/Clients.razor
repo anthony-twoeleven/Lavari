@@ -5,7 +5,7 @@
 <div class="lv-row" style="justify-content:space-between">
     <h1 style="margin:0;font-size:1.5rem">Clients, Job Groups &amp; Jobs</h1>
     <div class="lv-row">
-        <input class="lv-input" style="width:220px" placeholder="Search clients..." @bind="_search" />
+        <input class="lv-input" style="width:220px" aria-label="Search clients" placeholder="Search clients..." @bind="_search" />
         <LvButton Variant="tonal" OnClick="LoadAsync" Loading="_loading">Search</LvButton>
         @if (AppState.Can(ModuleKeys.Clients, AccessLevel.Alter))
         {
@@ -18,6 +18,10 @@
 
 <div class="lv-grid-2">
     <LvCard Title="Clients" Subtitle="Select a client to view its Job Groups and Jobs">
+        @if (!_loading && _error is null && _clients.Count == 0)
+        {
+            <p>No clients found. Try another search or create a client.</p>
+        }
         <div class="lv-table-wrap">
             <table class="lv-table">
                 <thead><tr><th>Client</th><th>Contact</th><th>Groups</th><th></th></tr></thead>
@@ -139,7 +143,7 @@
             </div>
             <LvTextField Label="Job Name" Required="true" Value="@_jobName" ValueChanged="v => _jobName = v ?? string.Empty" />
             <div class="lv-grid-2">
-                <LvTextField Label="IANA Time Zone" Required="true" Value="@_jobTz" ValueChanged="v => _jobTz = v ?? string.Empty" />
+                <TimeZoneSelect @bind-Value="_jobTz" Disabled="_saving" />
                 <LvTextField Label="Currency (ISO)" Required="true" Value="@_jobCurrency" ValueChanged="v => _jobCurrency = v ?? string.Empty" />
             </div>
             <LvTextField Label="PO Number" Value="@_jobPo" ValueChanged="v => _jobPo = v" />
