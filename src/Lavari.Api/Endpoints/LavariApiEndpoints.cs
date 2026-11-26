@@ -321,6 +321,9 @@ public static class LavariApiEndpoints
         api.MapGet("/integrations/status", (IIntegrationService svc, CancellationToken ct) => svc.GetStatusAsync(ct));
         api.MapPost("/integrations/supplier-capture", (SupplierCaptureRequest req, IIntegrationService svc, CancellationToken ct) => svc.ExtractSupplierPageDraftAsync(req, ct));
         api.MapGet("/integrations/drafts", (Guid? jobId, IIntegrationService svc, CancellationToken ct) => svc.ListExtractionDraftsAsync(jobId, ct));
+        api.MapGet("/integrations/drafts/{draftId:guid}", (Guid draftId, IIntegrationService svc, CancellationToken ct) => svc.GetExtractionDraftAsync(draftId, ct));
+        api.MapPost("/integrations/drafts/{draftId:guid}/accept", (Guid draftId, AcceptSupplierDraftRequest req, IIntegrationService svc, CancellationToken ct) =>
+            svc.AcceptSupplierDraftAsync(draftId, req, ct));
 
         // --- Administration ---
         api.MapGet("/admin/users", (IAdminService svc, int page = 1, int pageSize = 25, string? search = null, bool includeDeleted = false, CancellationToken ct = default) =>

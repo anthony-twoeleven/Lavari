@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lavari supplier companion</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="config.js" defer></script>
+  <script src="core.js" defer></script>
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Lavari supplier companion</h1>
+      <button id="open-window" type="button" class="secondary" hidden>Open in window</button>
+    </header>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div id="error" role="alert" hidden></div>
+    <section id="login-gate" aria-labelledby="connection-title">
+      <h2 id="connection-title">Sign in to Lavari</h2>
+      <p>Continue to Lavari to verify your sign-in. Your password stays on the Lavari sign-in page.</p>
+      <button id="connect" type="button">Continue to Lavari</button>
+      <p id="identity"></p>
+    </section>
+    <div id="workspace" hidden>
+    <section aria-labelledby="job-title">
+      <h2 id="job-title">2. Choose a job</h2>
+      <label for="client-search">Find client</label>
+      <div class="row"><input id="client-search" type="search"><button id="find-clients" type="button" class="secondary">Search</button></div>
+      <label for="client">Client</label>
+      <select id="client"><option value="">Select a client</option></select>
+      <label for="job-search">Find job</label>
+      <div class="row"><input id="job-search" type="search"><button id="find-jobs" type="button" class="secondary">Search</button></div>
+      <label for="job">Job</label>
+      <select id="job"><option value="">Select a job</option></select>
+      <p>Search results are limited to the first 50 matches; refine your search if needed.</p>
+    </section>
+    <section aria-labelledby="capture-title">
+      <h2 id="capture-title">3. Optional page capture</h2>
+      <p>On the supplier page, select only relevant product text, then open the extension. Do not select passwords, account details or other sensitive information.</p>
+      <button id="capture" type="button" class="secondary">Capture selected text</button>
+      <label for="page-text">Selected text to send</label>
+      <textarea id="page-text" maxlength="16000" rows="5"></textarea>
+      <label for="prompt">Gemini extraction prompt</label>
+      <textarea id="prompt" maxlength="4000" rows="2" placeholder="Optional instructions for Gemini." disabled></textarea>
+      <label class="check"><input id="use-gemini" type="checkbox" disabled> Use Gemini to extract product details</label>
+      <label id="provider-consent-label" class="check" hidden>
+        <input id="provider-consent" type="checkbox">
+        I consent to send the selected text and prompt to Google Gemini for processing.
+      </label>
+      <p id="provider-status">Gemini extraction is not enabled for this Lavari server. Local suggestions remain available.</p>
+      <label class="check"><input id="consent" type="checkbox"> I reviewed the URL and selected text and agree to send them to Lavari.</label>
+      <button id="analyze" type="button" class="secondary">Process selected text</button>
+      <button id="check-extraction" type="button" class="secondary" hidden>Check Gemini extraction</button>
+    </section>
+    <form id="line-form">
+      <h2>4. Review and add line item</h2>
+      <p>All suggestions are unverified. Correct the fields before saving. Manual entry does not need a prompt.</p>
+      <label for="title">Title <span aria-hidden="true">*</span></label><input id="title" required maxlength="500">
+      <label for="source">Source URL</label><input id="source" type="url" maxlength="2000">
+      <label for="description">Description</label><textarea id="description" rows="2"></textarea>
+      <label for="room">Room or area</label><input id="room">
+      <label for="attributes">Attributes (one per line: label | value | optional unit)</label><textarea id="attributes" rows="2"></textarea>
+      <label for="requirements">Requirements</label><textarea id="requirements" rows="2"></textarea>
+      <div class="grid">
+        <div><label for="quantity">Quantity</label><input id="quantity" inputmode="decimal" value="1" required></div>
+        <div><label for="unit">Unit</label><input id="unit" value="ea" required></div>
+        <div><label for="currency">Currency</label><input id="currency" value="AUD" maxlength="3" required></div>
+        <div><label for="cost">Cost per unit</label><input id="cost" inputmode="decimal" value="0.00" required></div>
+        <div><label for="rrp">RRP per unit</label><input id="rrp" inputmode="decimal" value="0.00" required></div>
+        <div><label for="sell">Sell price per unit</label><input id="sell" inputmode="decimal" value="0.00" required></div>
+      </div>
+      <label for="notes">Notes</label><textarea id="notes" rows="2"></textarea>
+      <div id="uncertain" hidden>
+        <p>A previous save may have completed. Check the job in Lavari before trying again to avoid a duplicate.</p>
+        <button id="acknowledge" type="button" class="secondary">I checked the job</button>
+      </div>
+      <button id="save" type="submit" disabled>Add line item</button>
+      <button id="discard" type="button" class="secondary">Discard draft</button>
+      <p>Drafts are kept in this browser session so closing the popup does not discard work. Do not use a shared browser profile for confidential drafts.</p>
+    </form>
+    </div>
+  </main>
+</body>
+</html>

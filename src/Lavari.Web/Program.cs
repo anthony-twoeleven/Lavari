@@ -70,6 +70,7 @@ builder.Services.AddAntiforgery(options =>
 builder.Services.AddSignalR();
 builder.Services.AddScoped<HttpCurrentActorContext>();
 builder.Services.AddScoped<ICurrentActorContext>(sp => sp.GetRequiredService<HttpCurrentActorContext>());
+builder.Services.AddScoped<ICurrentActorContextScope>(sp => sp.GetRequiredService<HttpCurrentActorContext>());
 builder.Services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
 
 var enableTickerQ = !string.Equals(builder.Configuration["Lavari:DisableTickerQ"], "true", StringComparison.OrdinalIgnoreCase);

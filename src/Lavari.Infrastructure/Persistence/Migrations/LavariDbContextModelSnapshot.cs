@@ -17,6 +17,110 @@ namespace Lavari.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
+            modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.AiSpendReservationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("BudgetDateUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedAtUtc")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InitiatingUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ReasoningTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ReservedCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ServicePrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TotalTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedAtUtc")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BudgetDateUtc", "InitiatingUserId");
+
+                    b.HasIndex("InitiatingUserId", "ClientRequestId")
+                        .IsUnique();
+
+                    b.ToTable("AiSpendReservations", t =>
+                        {
+                            t.HasCheckConstraint("CK_AiSpendReservation_Amount", "ReservedCents > 0");
+                        });
+                });
+
             modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.ApplicationVariableEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1078,6 +1182,9 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AiSourceImageAssetId")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("ByteLength")
                         .HasColumnType("INTEGER");
 
@@ -1154,10 +1261,15 @@ namespace Lavari.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AiSourceImageAssetId");
+
                     b.HasIndex("StorageKey")
                         .IsUnique();
 
-                    b.ToTable("ImageAssets");
+                    b.ToTable("ImageAssets", t =>
+                        {
+                            t.HasCheckConstraint("CK_ImageAssets_AiSourceNotSelf", "AiSourceImageAssetId IS NULL OR AiSourceImageAssetId <> Id");
+                        });
                 });
 
             modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.ImageAssociationEntity", b =>
@@ -1662,6 +1774,8 @@ namespace Lavari.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ImageAssetId");
+
                     b.HasIndex("JobId");
 
                     b.ToTable("JobLineItems");
@@ -1671,6 +1785,9 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AcceptedProductId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CapturedContentSanitized")
@@ -1713,6 +1830,9 @@ namespace Lavari.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("PromptTokens")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProviderConsentGrantedAtUtc")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ProviderName")
                         .IsRequired()
@@ -1883,6 +2003,8 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ImageAssetId");
 
                     b.HasIndex("CanvasId", "ZIndex");
 
@@ -2195,6 +2317,10 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                     b.Property<long>("RrpCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("SourceImageUrlsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SupplierName")
                         .HasColumnType("TEXT");
 
@@ -2214,6 +2340,8 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PrimaryImageAssetId");
 
                     b.ToTable("Products");
                 });
@@ -2284,6 +2412,8 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ImageAssetId");
 
                     b.HasIndex("ProductId");
 
@@ -2357,6 +2487,8 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ImageAssetId");
 
                     b.HasIndex("JobId");
 
@@ -2467,6 +2599,85 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("RolePermissions");
+                });
+
+            modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.SupplierExtractionWorkEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedAtUtc")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DraftId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InitiatingUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Prompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ReservationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelectedPageText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedAtUtc")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DraftId")
+                        .IsUnique();
+
+                    b.HasIndex("State", "CreatedAtUtc");
+
+                    b.ToTable("SupplierExtractionWork");
                 });
 
             modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.TimeBillingAllocationEntity", b =>
@@ -2857,6 +3068,14 @@ namespace Lavari.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("FinancialDocument");
+                });
+
+            modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.ImageAssetEntity", b =>
+                {
+                    b.HasOne("Lavari.Infrastructure.Persistence.Entities.ImageAssetEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AiSourceImageAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Lavari.Infrastructure.Persistence.Entities.ImageAssociationEntity", b =>

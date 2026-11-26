@@ -305,25 +305,44 @@ public sealed record IntegrationStatusDto
     public string? GmailConnectedAccount { get; init; }
     public required bool GeminiConfigured { get; init; }
     public required string GeminiModel { get; init; }
+    public required bool GeminiExtractionReady { get; init; }
     public required string StatusSummary { get; init; }
 }
 
 public sealed record SupplierCaptureRequest
 {
+    public Guid? ClientId { get; init; }
     public Guid? JobId { get; init; }
     public required string SourceUrl { get; init; }
     public required string PageTextContent { get; init; }
+    public string? Prompt { get; init; }
+    public bool UseGemini { get; init; }
     public bool UserConfirmedConsent { get; init; }
+    public bool UserConfirmedProviderConsent { get; init; }
 }
 
 public sealed record LlmExtractionDraftDto
 {
     public required Guid Id { get; init; }
     public Guid? JobId { get; init; }
+    public Guid? AcceptedProductId { get; init; }
     public required string SourceUrl { get; init; }
     public required string Status { get; init; }
     public required string ProviderName { get; init; }
     public required string ModelName { get; init; }
     public required string ExtractedJson { get; init; }
     public required DateTimeOffset CreatedAtUtc { get; init; }
+    public required string ConcurrencyToken { get; init; }
+    public DateTimeOffset? ProviderConsentGrantedAtUtc { get; init; }
+}
+
+public sealed record SupplierExtractionJobPayload
+{
+    public required Guid DraftId { get; init; }
+}
+
+public sealed record AcceptSupplierDraftRequest
+{
+    public required string ConcurrencyToken { get; init; }
+    public required UpsertProductRequest Product { get; init; }
 }

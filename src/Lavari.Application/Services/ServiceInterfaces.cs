@@ -229,4 +229,6 @@ public interface IIntegrationService
     Task<IntegrationStatusDto> GetStatusAsync(CancellationToken ct = default);
     Task<LlmExtractionDraftDto> ExtractSupplierPageDraftAsync(SupplierCaptureRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<LlmExtractionDraftDto>> ListExtractionDraftsAsync(Guid? jobId, CancellationToken ct = default);
+    Task<LlmExtractionDraftDto> GetExtractionDraftAsync(Guid draftId, CancellationToken ct = default);
+    Task<LlmExtractionDraftDto> AcceptSupplierDraftAsync(Guid draftId, AcceptSupplierDraftRequest request, CancellationToken ct = default);
 }

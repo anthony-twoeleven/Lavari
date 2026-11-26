@@ -88,10 +88,25 @@ public sealed class LavariDbContext : DbContext
     public DbSet<JobEmailLabelEntity> JobEmailLabels => Set<JobEmailLabelEntity>();
     public DbSet<ForecastSnapshotEntity> ForecastSnapshots => Set<ForecastSnapshotEntity>();
     public DbSet<LlmExtractionDraftEntity> LlmExtractionDrafts => Set<LlmExtractionDraftEntity>();
+    public DbSet<SupplierExtractionWorkEntity> SupplierExtractionWork => Set<SupplierExtractionWorkEntity>();
+    public DbSet<AiSpendReservationEntity> AiSpendReservations => Set<AiSpendReservationEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<AiSpendReservationEntity>(e =>
+        {
+            e.HasIndex(x => new { x.InitiatingUserId, x.ClientRequestId }).IsUnique();
+            e.HasIndex(x => new { x.BudgetDateUtc, x.InitiatingUserId });
+            e.ToTable(t => t.HasCheckConstraint("CK_AiSpendReservation_Amount", "ReservedCents > 0"));
+        });
+
+        modelBuilder.Entity<SupplierExtractionWorkEntity>(e =>
+        {
+            e.HasIndex(x => x.DraftId).IsUnique();
+            e.HasIndex(x => new { x.State, x.CreatedAtUtc });
+        });
 
         // Configure soft-delete filters, concurrency tokens and UTC ISO converters uniformly across all entities.
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())
@@ -247,20 +262,29 @@ public sealed class LavariDbContext : DbContext
         });
 
         // Products, Line Items, Images, Mood Boards
+        modelBuilder.Entity<ProductEntity>()
+            .HasIndex(x => x.PrimaryImageAssetId);
+
         modelBuilder.Entity<ProductVariantEntity>(e =>
         {
             e.HasOne(x => x.Product).WithMany(p => p.Variants).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.ImageAssetId);
         });
 
         modelBuilder.Entity<JobLineItemEntity>(e =>
         {
             e.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.JobId);
+            e.HasIndex(x => x.ImageAssetId);
         });
 
         modelBuilder.Entity<ImageAssetEntity>(e =>
         {
             e.HasIndex(x => x.StorageKey).IsUnique();
+            e.HasOne<ImageAssetEntity>().WithMany().HasForeignKey(x => x.AiSourceImageAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_ImageAssets_AiSourceNotSelf", "AiSourceImageAssetId IS NULL OR AiSourceImageAssetId <> Id"));
         });
 
         modelBuilder.Entity<ImageAssociationEntity>(e =>
@@ -285,6 +309,7 @@ public sealed class LavariDbContext : DbContext
         {
             e.HasOne(x => x.Canvas).WithMany(c => c.Elements).HasForeignKey(x => x.CanvasId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.CanvasId, x.ZIndex });
+            e.HasIndex(x => x.ImageAssetId);
         });
 
         // Financial Documents, Procurement, Receipts
@@ -333,6 +358,7 @@ public sealed class LavariDbContext : DbContext
         {
             e.HasOne(x => x.Job).WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.JobId);
+            e.HasIndex(x => x.ImageAssetId);
         });
 
         modelBuilder.Entity<DocumentTemplateEntity>(e =>
@@ -396,6 +422,23 @@ public sealed class LavariDbContext : DbContext
             if (entry.State is not (EntityState.Added or EntityState.Modified))
             {
                 continue;
+            }
+
+            if (entry.Entity is ImageAssetEntity && entry.State == EntityState.Modified)
+            {
+                var source = entry.Property(nameof(ImageAssetEntity.AiSourceImageAssetId));
+                if (source.IsModified)
+                {
+                    var image = (ImageAssetEntity)entry.Entity;
+                    var stored = await ImageAssets.IgnoreQueryFilters().AsNoTracking()
+                        .Where(x => x.Id == image.Id)
+                        .Select(x => new { x.AiSourceImageAssetId })
+                        .SingleOrDefaultAsync(cancellationToken);
+                    if (stored is null || stored.AiSourceImageAssetId != image.AiSourceImageAssetId)
+                        throw new ConflictServiceException(
+                            "Image derivation cannot be changed after creation.",
+                            ErrorCodes.RecordImmutable);
+                }
             }
 
             if (entry.Entity is AuditableSoftDeletableEntity mutable)

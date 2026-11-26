@@ -1185,6 +1185,15 @@ explicitly saves the draft. No extracted value, including pricing or variant,
 is authoritative without review. If capture or model extraction fails, keep
 manual entry available and report an actionable error.
 
+For local supplier drafts, acceptance must create the editable global product
+and transition the draft to Approved atomically, guarded by the draft's
+concurrency token and the user's Supplier Capture and Product Catalog grants.
+Retain supplier-provided image URLs as inert source references only unless a
+user explicitly imports an image through the shared image pipeline after
+rights review; do not fetch or render untrusted URLs. Adding an accepted
+catalog product to a job is a separate, authorized job-line-item operation
+under the job's exclusive edit lease, preserving job-specific values.
+
 The LLM is optional behind a provider-neutral interface; no model, paid
 account or provider is assumed. Send only the minimum user-approved,
 sanitized content needed for extraction, under an approved provider's data
@@ -1192,9 +1201,10 @@ handling terms. Supplier and client content must not be sent to a third party
 without appropriate authorization. Treat page text and model output as
 untrusted: prevent prompt injection from granting tools or changing
 instructions, validate structured output against the schema, and never let
-the model invoke business actions directly. Queue expensive extraction using
-the scheduled-work mechanism and report status. Add quotas, usage telemetry,
-timeouts and configurable spend limits before enabling the integration.
+the model invoke business actions directly. Supplier-page extraction is an
+asynchronous provider call awaited directly by the authenticated API request;
+it does not use scheduled work. Keep input/output bounds, provider timeouts,
+quotas, usage telemetry and configurable spend limits.
 
 Create a named, non-human LLM service principal with only the registered
 permissions needed to create extraction drafts, not Full Access. Record the
@@ -1205,6 +1215,68 @@ permissions and the service principal's permissions when executing and when
 saving results. Do not log prompts, credentials, supplier sessions or
 sensitive page contents by default. Keep provider credentials in a secret
 provider, not audit history.
+
+The supplier-extraction implementation persists and audits conservative
+UTC-daily reservations, per-user request counts and reported token usage.
+The request fingerprint, prompt, captured text and extracted model response
+are excluded from audit snapshots. Missing or invalid budget variables deny
+reservations; once execution starts, the full estimate remains charged even
+if the outcome is uncertain. Supplier extraction records separate provider
+consent, current-user and named-service-principal permission rechecks, bounded
+provider input/output and review-only results. The provider call runs directly
+in the API request after reservation and authorization; the reservation's full
+estimate remains charged once execution starts, even if the outcome is
+uncertain. Configuration alone does not authorize or send a provider request.
+The reservation ledger does not itself
+enforce actual provider charges; a reviewed model-specific price cap and
+operational recovery remain required.
+
+### AI capabilities and future workflows
+
+Separate the provider transport from task-specific services. A provider-neutral
+text capability can support structured supplier suggestions and conversational
+answers; an image-editing capability uses a separately selected compatible
+model. Model identifiers are deployment configuration, not proof of a model's
+capabilities or suitability. Keep each capability replaceable and fail
+explicitly when the configured provider does not support it. Gemini's text and
+image adapters are registered behind those capabilities and resolve only with
+enabled configuration and credentials. Supplier extraction is invoked
+directly by its authorized API workflow; it does not depend on the scheduled
+work system. Configuration alone does not send requests.
+
+Before enabling chat grounded in application data, define and implement
+permission-aware retrieval for each included database record, document and
+image. Recheck access at retrieval and response time; never expose protected
+content through search results, citations, links, conversation history or
+cached context. Send only the minimum content explicitly approved for the
+provider, treat retrieved content and model responses as untrusted, and
+provide clear provenance and uncertainty. AI-generated job templates are
+drafts only: users review and explicitly save them through the ordinary
+authorized, validated and audited job workflow. Do not give the model direct
+business-action tools.
+
+An internal grounded-chat generator accepts bounded caller-supplied excerpts
+and maps model citation numbers to caller-owned record references. It is not
+an authorized retrieval or execution workflow, and a valid citation number
+does not prove an answer is correct. The caller must enforce consent and
+permissions at retrieval and recheck every supplied source, including uncited
+sources, at response time. Render model text as untrusted plain text before
+the generator can be connected to the application.
+An internal job-draft generator can suggest bounded name, description and
+notes fields from approved text. It neither selects business records nor
+creates a job and is not connected to an application workflow.
+
+Image edits require explicit consent to send the selected image, confirmation
+of rights, and current access to the source and all relevant associations.
+Process generated bytes through the shared image validation and 1080p storage
+pipeline, then persist an auditable derived-image relationship to the
+unchanged original. Do not overwrite an existing image, board or issued
+snapshot; let the user review and explicitly select the derived image.
+Require the same queue, attribution, permissions, quotas, usage telemetry and
+spend controls as other AI requests before enabling these workflows.
+The image table can persist an audited, immutable source relationship for a
+future derived image; it does not by itself authorize, generate, store or
+expose AI edits.
 
 ## Gmail job association
 
@@ -1351,6 +1423,42 @@ commercial release, downgrade EF Core, mix incompatible packages or claim
 this blocker is resolved. Re-evaluate the exact artifacts and policy before
 implementation; a change to the requested scheduler or dependency policy
 requires an explicit decision.
+
+An isolated evaluation on 26 November 2026 rebuilt TickerQ's 10.4.0 source
+at commit `c6ed1e7daa90ab3f4c65b40319a153126a910093`, targeting .NET 11
+with EF Core 11 and FlexLabs Upsert 11; all 74 upstream EF persistence tests
+passed against their SQLite test setup. This is not the published 10.4.0
+package and does not establish production compatibility, restart recovery,
+concurrent multi-instance behavior, migration or audit guarantees. The
+evaluation also reported a vulnerability in its build-only SourceLink
+dependency. A maintained, license-reviewed fork and its complete dependency
+graph would need review and representative integration tests before adoption;
+the scheduler blocker is not resolved by this experiment. The published
+`TickerQ.Utilities` 10.4.0 package also constrains several
+`Microsoft.Extensions` dependencies to versions below 11, so rebuilding
+only the EF persistence adapter is not enough to establish a compatible
+single-process dependency graph.
+
+An additional isolated SQLite test against that rebuilt source found that
+the [timed-out-job fallback](https://github.com/Arcenox-co/TickerQ/blob/c6ed1e7daa90ab3f4c65b40319a153126a910093/src/TickerQ.EntityFrameworkCore/Infrastructure/BasePersistenceProvider.cs)
+can acquire an overdue queued job still owned by
+another node. A scratch-only change restricting acquisition to unowned idle
+jobs passed the upstream persistence suite and focused ownership tests, but
+has not established restart recovery or production-safe coordination. In a
+separate simulated restart, invoking the [startup cleanup](https://github.com/Arcenox-co/TickerQ/blob/c6ed1e7daa90ab3f4c65b40319a153126a910093/src/TickerQ.EntityFrameworkCore/DependencyInjection/ServiceExtension.cs)
+with a new node
+identifier left the previous node's in-progress job locked. Recovery needs
+verified node liveness or an equivalent durable lease; the fork must not be
+adopted on the strength of those tests alone.
+
+Two additional isolated tests of the unmodified 10.4.0 persistence code on
+.NET 10 demonstrated that a stale time-job or cron worker can mark another
+node's in-progress claim complete and release its lock. The completion updates
+filter by job ID without an ownership or fencing check. A recovery solution
+must fence stale completion and business writes, not just reclaim abandoned
+jobs. The isolated test dependency graph also reported a high-severity
+advisory for `SQLitePCLRaw.lib.e_sqlite3` 2.1.11; this finding is about that
+test graph, not a determination that Lavari uses that version.
 
 When an eligible adapter is selected, verify durable scheduler storage,
 SQLite concurrency, restart recovery, migrations and audit coverage. Define

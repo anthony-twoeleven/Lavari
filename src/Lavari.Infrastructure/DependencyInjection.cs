@@ -3,8 +3,10 @@ using Lavari.Application.Formatting;
 using Lavari.Application.Locking;
 using Lavari.Application.Security;
 using Lavari.Application.Services;
+using Lavari.Domain.Errors;
 using Lavari.Infrastructure.Caching;
 using Lavari.Infrastructure.Documents;
+using Lavari.Infrastructure.Integrations;
 using Lavari.Infrastructure.Locking;
 using Lavari.Infrastructure.Media;
 using Lavari.Infrastructure.Persistence;
@@ -16,6 +18,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using TickerQ.DependencyInjection;
 
 namespace Lavari.Infrastructure;
@@ -41,6 +45,23 @@ public static class DependencyInjection
 
         services.AddSingleton<IAppCacheService, AppCacheService>();
         services.AddSingleton<IPrivateFileStore, LocalPrivateFileStore>();
+        services.AddSingleton<GeminiApiClient>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<LavariIntegrationsOptions>>().Value.Gemini;
+            if (!options.Enabled)
+                throw new ExternalIntegrationServiceException(
+                    "The AI provider is disabled.",
+                    possibleCause: "Ask an administrator to configure the integration.");
+            if (!GeminiApiClient.IsValidApiKey(options.ApiKey))
+                throw new ExternalIntegrationServiceException(
+                    "The AI provider is not configured.",
+                    possibleCause: "Ask an administrator to check the integration credentials.");
+            return new GeminiApiClient(options.ApiKey);
+        });
+        services.TryAddSingleton<IGenerativeTextProvider>(sp =>
+            new GeminiTextProvider(sp.GetRequiredService<GeminiApiClient>()));
+        services.TryAddSingleton<IGenerativeImageProvider>(sp =>
+            new GeminiImageProvider(sp.GetRequiredService<GeminiApiClient>()));
 
         services.AddDbContext<LavariDbContext>((serviceProvider, options) =>
         {
@@ -73,6 +94,8 @@ public static class DependencyInjection
         services.AddScoped<IFinancialDocumentService, FinancialDocumentService>();
         services.AddScoped<IForecastingService, ForecastingService>();
         services.AddScoped<IIntegrationService, IntegrationService>();
+        services.AddScoped<SupplierAiAuthorization>();
+        services.AddScoped<SupplierAiSpendReservations>();
 
         if (enableTickerQ)
         {

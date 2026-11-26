@@ -22,6 +22,11 @@ public interface ICurrentActorContext
     IReadOnlyDictionary<string, AccessLevel> EffectivePermissions { get; }
 }
 
+public interface ICurrentActorContextScope
+{
+    IDisposable Use(ICurrentActorContext context);
+}
+
 public interface IPermissionEvaluator
 {
     void RequireAuthenticated();

@@ -351,6 +351,13 @@ public sealed class EditLockService : IEditLockService
 
         if (active.ExpiresAtUtc <= now)
         {
+            if (_db.Database.CurrentTransaction is not null)
+            {
+                throw new ConflictServiceException(
+                    $"Your editing lock on this {recordType} has expired.",
+                    ErrorCodes.EditLockExpired,
+                    "Click Modify to reacquire the lock and review the latest version before saving.");
+            }
             active.State = "Expired";
             await _db.SaveChangesAsync(ct);
             await AdvanceQueueIfFreeAsync(recordType, recordId, ct);

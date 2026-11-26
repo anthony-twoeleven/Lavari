@@ -38,6 +38,7 @@ public sealed record ProductDto
     public DateTimeOffset? PriceObservedAtUtc { get; init; }
     public required IReadOnlyList<ProductAttributeDto> Attributes { get; init; }
     public required IReadOnlyList<string> VariantIdentifierKeys { get; init; }
+    public required IReadOnlyList<string> SourceImageUrls { get; init; }
     public Guid? PrimaryImageAssetId { get; init; }
     public required IReadOnlyList<ProductVariantDto> Variants { get; init; }
     public required string ConcurrencyToken { get; init; }
@@ -56,6 +57,7 @@ public sealed record UpsertProductRequest
     public long RrpCents { get; init; }
     public IReadOnlyList<ProductAttributeDto> Attributes { get; init; } = [];
     public IReadOnlyList<string> VariantIdentifierKeys { get; init; } = [];
+    public IReadOnlyList<string> SourceImageUrls { get; init; } = [];
     public Guid? PrimaryImageAssetId { get; init; }
     public string? ConcurrencyToken { get; init; }
 }
@@ -99,6 +101,7 @@ public sealed record JobLineItemDto
 
 public sealed record UpsertJobLineItemRequest
 {
+    public Guid? ClientId { get; init; }
     public Guid? ProductId { get; init; }
     public Guid? ProductVariantId { get; init; }
     public required string Title { get; init; }

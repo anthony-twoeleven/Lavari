@@ -15,6 +15,7 @@ public sealed class ProductEntity : AuditableSoftDeletableEntity
     public int AttributesSchemaVersion { get; set; } = 1;
     public string AttributesJson { get; set; } = "[]";
     public string VariantIdentifierKeysJson { get; set; } = "[]";
+    public string SourceImageUrlsJson { get; set; } = "[]";
     public Guid? PrimaryImageAssetId { get; set; }
     public List<ProductVariantEntity> Variants { get; set; } = [];
 }
@@ -72,6 +73,7 @@ public sealed class ImageAssetEntity : AuditableSoftDeletableEntity
     public bool RightsConfirmed { get; set; }
     public Guid UploadedByUserId { get; set; }
     public bool IsGlobalLibrary { get; set; } = true;
+    public Guid? AiSourceImageAssetId { get; set; }
     public List<ImageAssociationEntity> Associations { get; set; } = [];
 }
 

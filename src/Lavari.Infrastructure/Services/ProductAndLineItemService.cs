@@ -111,6 +111,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
             PriceObservedAtUtc = _timeProvider.GetUtcNow(),
             AttributesJson = JsonSerializer.Serialize(request.Attributes, JsonOpts),
             VariantIdentifierKeysJson = JsonSerializer.Serialize(request.VariantIdentifierKeys, JsonOpts),
+            SourceImageUrlsJson = JsonSerializer.Serialize(request.SourceImageUrls, JsonOpts),
             PrimaryImageAssetId = request.PrimaryImageAssetId
         };
         _db.Products.Add(entity);
@@ -144,6 +145,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         entity.PriceObservedAtUtc = _timeProvider.GetUtcNow();
         entity.AttributesJson = JsonSerializer.Serialize(request.Attributes, JsonOpts);
         entity.VariantIdentifierKeysJson = JsonSerializer.Serialize(request.VariantIdentifierKeys, JsonOpts);
+        entity.SourceImageUrlsJson = JsonSerializer.Serialize(request.SourceImageUrls, JsonOpts);
         entity.PrimaryImageAssetId = request.PrimaryImageAssetId;
 
         await _db.SaveChangesAsync(ct);
@@ -221,12 +223,26 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
     {
         _permissions.Require(ModuleKeys.Jobs, AccessLevel.Read);
         _permissions.Require(ModuleKeys.JobLineItems, AccessLevel.Alter);
+        if (request.ClientId.HasValue)
+        {
+            _permissions.Require(ModuleKeys.Clients, AccessLevel.Read);
+        }
+        if (!request.LeaseId.HasValue || !request.FencingVersion.HasValue)
+        {
+            throw new ConflictServiceException("An active editing lock is required.", ErrorCodes.EditLockRequired);
+        }
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, jobId, request.LeaseId, request.FencingVersion, ct);
 
         ValidateLineItemRequest(request);
-        if (!await _db.Jobs.AnyAsync(j => j.Id == jobId, ct))
+        var clientId = await _db.Jobs.Where(j => j.Id == jobId).Select(j => (Guid?)j.ClientId).FirstOrDefaultAsync(ct);
+        if (!clientId.HasValue)
         {
             throw new NotFoundServiceException("Job not found.");
+        }
+        if (request.ClientId.HasValue && request.ClientId != clientId)
+        {
+            throw new ValidationServiceException("The selected job does not belong to the selected client.");
         }
 
         var currency = MoneyCents.NormalizeAndValidateCurrency(request.Currency);
@@ -254,6 +270,8 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         };
         _db.JobLineItems.Add(entity);
         await _db.SaveChangesAsync(ct);
+        await _editLocks.EnsureActiveLeaseHeldAsync(LockableRecordType.Job, jobId, request.LeaseId, request.FencingVersion, ct);
+        await transaction.CommitAsync(ct);
         return MapLineItem(entity);
     }
 
@@ -354,6 +372,15 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
                 throw new ValidationServiceException($"Duplicate or blank attribute key '{attr.Key}'.");
             }
         }
+
+        if (request.SourceImageUrls is null || request.SourceImageUrls.Count > 10 || request.SourceImageUrls.Any(url =>
+                string.IsNullOrWhiteSpace(url) || url.Length > 2000 ||
+                !Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+                !string.IsNullOrEmpty(uri.UserInfo)))
+        {
+            throw new ValidationServiceException("Source image references must be up to 10 absolute HTTP(S) URLs without credentials.");
+        }
     }
 
     private static void ValidateLineItemRequest(UpsertJobLineItemRequest request)
@@ -385,6 +412,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         PriceObservedAtUtc = p.PriceObservedAtUtc,
         Attributes = DeserializeList<ProductAttributeDto>(p.AttributesJson),
         VariantIdentifierKeys = DeserializeList<string>(p.VariantIdentifierKeysJson),
+        SourceImageUrls = DeserializeList<string>(p.SourceImageUrlsJson),
         PrimaryImageAssetId = p.PrimaryImageAssetId,
         Variants = p.Variants.Where(v => !v.IsDeleted).Select(MapVariant).ToArray(),
         ConcurrencyToken = p.ConcurrencyToken,

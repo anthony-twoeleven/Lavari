@@ -210,12 +210,55 @@ public sealed class ForecastSnapshotEntity : AuditableSoftDeletableEntity
 public sealed class LlmExtractionDraftEntity : AuditableSoftDeletableEntity
 {
     public Guid? JobId { get; set; }
+    public Guid? AcceptedProductId { get; set; }
+    [ExcludeFromAudit]
     public string SourceUrl { get; set; } = string.Empty;
     public string CapturedContentSanitized { get; set; } = string.Empty;
+    [ExcludeFromAudit]
     public string ExtractedJson { get; set; } = "{}";
-    public string Status { get; set; } = "PendingReview"; // PendingReview, Approved, Rejected
+    public string Status { get; set; } = "PendingReview"; // Processing, PendingReview, Approved, Rejected, Failed
     public string ProviderName { get; set; } = "Gemini";
     public string ModelName { get; set; } = string.Empty;
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }
+    public DateTimeOffset? ProviderConsentGrantedAtUtc { get; set; }
+}
+
+public sealed class SupplierExtractionWorkEntity : AuditableSoftDeletableEntity
+{
+    public Guid DraftId { get; set; }
+    public Guid InitiatingUserId { get; set; }
+    public Guid? ClientId { get; set; }
+    public Guid? JobId { get; set; }
+    public Guid ReservationId { get; set; }
+    public string CorrelationId { get; set; } = string.Empty;
+    [ExcludeFromAudit]
+    public string SourceUrl { get; set; } = string.Empty;
+    [ExcludeFromAudit]
+    public string SelectedPageText { get; set; } = string.Empty;
+    [ExcludeFromAudit]
+    public string Prompt { get; set; } = string.Empty;
+    public string State { get; set; } = "Queued";
+}
+
+public sealed class AiSpendReservationEntity : AuditableSoftDeletableEntity
+{
+    public Guid InitiatingUserId { get; set; }
+    public Guid ServicePrincipalId { get; set; }
+    public Guid ClientRequestId { get; set; }
+    [ExcludeFromAudit]
+    public string RequestFingerprint { get; set; } = string.Empty;
+    public Guid? ClientId { get; set; }
+    public Guid? JobId { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public DateOnly BudgetDateUtc { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public long ReservedCents { get; set; }
+    public string State { get; set; } = "Reserved";
+    public int? InputTokens { get; set; }
+    public int? OutputTokens { get; set; }
+    public int? ReasoningTokens { get; set; }
+    public int? TotalTokens { get; set; }
 }

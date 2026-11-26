@@ -4,7 +4,7 @@ using Lavari.Domain.Security;
 
 namespace Lavari.Api.Security;
 
-public sealed class HttpCurrentActorContext : ICurrentActorContext
+public sealed class HttpCurrentActorContext : ICurrentActorContext, ICurrentActorContextScope
 {
     private static readonly FrozenDictionary<string, AccessLevel> EmptyGrants =
         PermissionRegistry.ComputeEffectiveGrants(false, []);
@@ -48,5 +48,62 @@ public sealed class HttpCurrentActorContext : ICurrentActorContext
         EffectivePermissions = PermissionRegistry.ComputeEffectiveGrants(
             true,
             [new RoleGrantSnapshot(Guid.Empty, "System", true, new Dictionary<string, AccessLevel>())]);
+    }
+
+    public IDisposable Use(ICurrentActorContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!context.IsAuthenticated || !context.ActorId.HasValue ||
+            (context.IsSystemPrincipal && context.IsFullAccess))
+        {
+            throw new InvalidOperationException("Only a validated, least-privilege actor context can be applied.");
+        }
+
+        var previous = new ActorSnapshot(
+            IsAuthenticated, IsSystemPrincipal, ActorId, ActorDisplayName, CorrelationId,
+            EditingSessionId, IsFullAccess, EffectivePermissions);
+        Apply(context);
+        return new RestoreScope(this, previous);
+    }
+
+    private void Apply(ICurrentActorContext context)
+    {
+        IsAuthenticated = context.IsAuthenticated;
+        IsSystemPrincipal = context.IsSystemPrincipal;
+        ActorId = context.ActorId;
+        ActorDisplayName = context.ActorDisplayName;
+        CorrelationId = context.CorrelationId;
+        EditingSessionId = context.EditingSessionId;
+        IsFullAccess = context.IsFullAccess;
+        EffectivePermissions = context.EffectivePermissions;
+    }
+
+    private sealed record ActorSnapshot(
+        bool IsAuthenticated,
+        bool IsSystemPrincipal,
+        Guid? ActorId,
+        string ActorDisplayName,
+        string CorrelationId,
+        string EditingSessionId,
+        bool IsFullAccess,
+        IReadOnlyDictionary<string, AccessLevel> EffectivePermissions);
+
+    private sealed class RestoreScope(HttpCurrentActorContext owner, ActorSnapshot previous) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            owner.IsAuthenticated = previous.IsAuthenticated;
+            owner.IsSystemPrincipal = previous.IsSystemPrincipal;
+            owner.ActorId = previous.ActorId;
+            owner.ActorDisplayName = previous.ActorDisplayName;
+            owner.CorrelationId = previous.CorrelationId;
+            owner.EditingSessionId = previous.EditingSessionId;
+            owner.IsFullAccess = previous.IsFullAccess;
+            owner.EffectivePermissions = previous.EffectivePermissions;
+            _disposed = true;
+        }
     }
 }

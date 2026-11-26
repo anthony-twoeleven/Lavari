@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Lavari supplier companion",
+  "version": "0.1.0",
+  "description": "Review selected supplier details and add them to a Lavari job.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "action": {
+    "default_title": "Lavari supplier companion",
+    "default_popup": "popup.html"
+  }
+}
