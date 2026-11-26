@@ -6,8 +6,4 @@
     <ProjectReference Include="..\Lavari.Domain\Lavari.Domain.csproj" />
     <ProjectReference Include="..\Lavari.Contracts\Lavari.Contracts.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options" />
-  </ItemGroup>
 </Project>

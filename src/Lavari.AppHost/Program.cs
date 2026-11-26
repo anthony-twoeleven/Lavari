@@ -1,6 +1,8 @@
+using Aspire.Hosting;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.AddProject<Projects.Lavari_Web>("lavari-web")
+builder.AddDotnetProject("lavari-web", "../Lavari.Web/Lavari.Web.csproj")
     .WithExternalHttpEndpoints()
     .WithHttpHealthCheck("/health");
 

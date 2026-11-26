@@ -1,14 +1,12 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Lavari.AppHost</RootNamespace>
     <UserSecretsId>lavari-apphost-local-dev</UserSecretsId>
-    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Lavari.Web\Lavari.Web.csproj" />
+    <PackageReference Include="Aspire.Hosting.Dotnet" />
   </ItemGroup>
 </Project>

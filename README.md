@@ -6,9 +6,11 @@ procurement.
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (LTS, matches
-  the installed SDK and allows open-source MIT/Apache-2.0 TickerQ 10.4.0 with
-  EF Core 10 SQLite)
+- [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0)
+
+TickerQ 10.4.0 and EF Core 10.0.15 are intentionally pinned: the documented
+license and EF Core 11 compatibility blocker prevents safely upgrading either
+dependency until the scheduler decision is resolved.
 
 ## Running locally
 
