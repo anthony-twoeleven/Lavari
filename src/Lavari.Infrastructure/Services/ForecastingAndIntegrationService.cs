@@ -262,7 +262,7 @@ public sealed class GeminiIntegrationOptions
 {
     public bool Enabled { get; set; }
     public string? ApiKey { get; set; }
-    public string Model { get; set; } = "gemini-2.5-flash";
+    public string Model { get; set; } = "gemini-3.5-flash-lite";
 }
 
 /// <summary>
@@ -401,12 +401,25 @@ public sealed partial class IntegrationService : IIntegrationService
             throw new ValidationServiceException("A valid http/https supplier URL without credentials is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.PageTextContent) || request.PageTextContent.Length > 16000)
+        var pageText = request.PageTextContent ?? string.Empty;
+        if (pageText.Length > 16000)
         {
-            throw new ValidationServiceException("Provide selected supplier text of at most 16,000 characters.");
+            throw new ValidationServiceException("Supplier page text must be at most 16,000 characters.");
         }
 
-        var sanitized = SanitizeContent(request.PageTextContent);
+        var sanitized = SanitizeContent(pageText);
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            var fetcher = _services.GetRequiredService<ISupplierPageFetcher>();
+            sanitized = await fetcher.FetchTextAsync(uri, ct);
+        }
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            throw new ValidationServiceException(
+                "No product text could be read from the supplier page.",
+                possibleCause: "Paste the product details into the optional page-text field and try again.");
+        }
+
         if (request.UseGemini)
         {
             return await ExtractGeminiSupplierPageDraftAsync(request, uri, resolvedClientId, sanitized, ct);
@@ -511,7 +524,7 @@ public sealed partial class IntegrationService : IIntegrationService
                 var extractor = new SupplierPageTextExtractor(provider);
                 try
                 {
-                    (suggestion, usage) = await extractor.ExtractAsync(_options.Gemini.Model, selectedText, prompt, ct);
+                    (suggestion, usage) = await extractor.ExtractAsync(_options.Gemini.Model, sourceUri, selectedText, prompt, ct);
                 }
                 catch (ExternalIntegrationServiceException ex)
                 {
@@ -544,8 +557,19 @@ public sealed partial class IntegrationService : IIntegrationService
                     description = suggestion.Description,
                     candidateRrpCents = suggestion.CandidateRrpCents,
                     currency = suggestion.Currency,
-                    attributes = suggestion.Attributes.Select(x => new { label = x.Label, value = x.Value }),
-                    identifiers = suggestion.Identifiers.Select(x => new { label = x.Label, value = x.Value }),
+                    sku = suggestion.Sku,
+                    attributes = suggestion.Attributes.Select(x => new
+                    {
+                        key = x.Key, label = x.Label, value = x.Value, valueType = x.ValueType, unit = x.Unit
+                    }),
+                    identifiers = suggestion.Identifiers.Select(x => new
+                    {
+                        key = x.Key, label = x.Label, value = x.Value, valueType = x.ValueType, unit = x.Unit
+                    }),
+                    customFields = suggestion.CustomFields.Select(x => new
+                    {
+                        key = x.Key, label = x.Label, value = x.Value, valueType = x.ValueType, unit = x.Unit
+                    }),
                     imageUrls = suggestion.ImageUrls,
                     requiresUserReview = true,
                     note = "Gemini suggestion; verify every field before accepting."
@@ -671,7 +695,16 @@ public sealed partial class IntegrationService : IIntegrationService
     private static string SanitizeContent(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
-        return Regex.Replace(raw, "<.*?>", " ").Trim();
+        try
+        {
+            return PublicSupplierPageFetcher.ExtractProductText(raw);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            throw new ValidationServiceException(
+                "The supplier page text could not be parsed.",
+                possibleCause: "Paste plain product details instead of the full page markup.");
+        }
     }
 
     private static LlmExtractionDraftDto MapDraft(LlmExtractionDraftEntity d) => new()

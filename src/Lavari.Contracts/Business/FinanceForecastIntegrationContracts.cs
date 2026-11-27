@@ -314,7 +314,7 @@ public sealed record SupplierCaptureRequest
     public Guid? ClientId { get; init; }
     public Guid? JobId { get; init; }
     public required string SourceUrl { get; init; }
-    public required string PageTextContent { get; init; }
+    public string PageTextContent { get; init; } = string.Empty;
     public string? Prompt { get; init; }
     public bool UseGemini { get; init; }
     public bool UserConfirmedConsent { get; init; }

@@ -44,7 +44,8 @@ public sealed class ApiEndToEndTests : IDisposable
                         ["Lavari:SeedDevelopmentSuperAdmin"] = "true",
                         ["Lavari:DisableTickerQ"] = "true",
                         ["Lavari:Integrations:Gemini:Enabled"] = "true",
-                        ["Lavari:Integrations:Gemini:ApiKey"] = "test-key"
+                        ["Lavari:Integrations:Gemini:ApiKey"] = "test-key",
+                        ["Lavari:AiBudget:DailyLimitCents"] = "0"
                     });
                 });
             });
@@ -200,7 +201,21 @@ public sealed class ApiEndToEndTests : IDisposable
             Currency = "AUD",
             CostCents = 5000,
             RrpCents = 12500,
-            Attributes = [new ProductAttributeDto { Key = "material", Label = "Material", Value = "Timber" }],
+            Attributes =
+            [
+                new ProductAttributeDto { Key = "material", Label = "Material", Value = "Timber" },
+                new ProductAttributeDto { Key = "selected-size", Label = "Selected size", Value = "500x760" },
+                new ProductAttributeDto
+                {
+                    Key = "selected-frame-color", Label = "Selected frame color", Value = "black",
+                    ValueType = ProductAttributeValueTypes.Text
+                },
+                new ProductAttributeDto
+                {
+                    Key = "height", Label = "Height", Value = "760",
+                    ValueType = ProductAttributeValueTypes.Number, Unit = "mm"
+                }
+            ],
             VariantIdentifierKeys = ["material"],
             SourceImageUrls = ["https://supplier.example/images/chair.jpg"]
         };
@@ -214,6 +229,22 @@ public sealed class ApiEndToEndTests : IDisposable
                 Product = productRequest with { SourceImageUrls = ["https://user:password@supplier.example/images/chair.jpg"] }
             });
         Assert.Equal(HttpStatusCode.BadRequest, invalidImageReference.StatusCode);
+        var invalidAttribute = await admin.PostAsJsonAsync($"/api/integrations/drafts/{draft.Id}/accept",
+            new AcceptSupplierDraftRequest
+            {
+                ConcurrencyToken = draft.ConcurrencyToken,
+                Product = productRequest with
+                {
+                    Attributes =
+                    [
+                        new ProductAttributeDto
+                        {
+                            Key = "selected-size", Label = "Selected size", Value = "large", ValueType = "unsupported"
+                        }
+                    ]
+                }
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidAttribute.StatusCode);
 
         var acceptedResponse = await admin.PostAsJsonAsync($"/api/integrations/drafts/{draft.Id}/accept",
             new AcceptSupplierDraftRequest { ConcurrencyToken = draft.ConcurrencyToken, Product = productRequest });
@@ -225,6 +256,10 @@ public sealed class ApiEndToEndTests : IDisposable
         Assert.Equal("Reviewed Sample Chair", savedProduct!.Name);
         Assert.Equal("A chair for a living room.", savedProduct.Description);
         Assert.Equal(new[] { "https://supplier.example/images/chair.jpg" }, savedProduct.SourceImageUrls);
+        Assert.Contains(savedProduct.Attributes, attribute => attribute.Key == "selected-size" && attribute.Value == "500x760");
+        Assert.Contains(savedProduct.Attributes, attribute => attribute.Key == "selected-frame-color" && attribute.Value == "black");
+        Assert.Contains(savedProduct.Attributes, attribute =>
+            attribute.Key == "height" && attribute.ValueType == ProductAttributeValueTypes.Number && attribute.Unit == "mm");
 
         var lockResponse = await admin.PostAsJsonAsync("/api/locks/modify",
             new EditLockActionRequest { RecordType = LockableRecordType.Job, RecordId = job.Id });
@@ -249,6 +284,10 @@ public sealed class ApiEndToEndTests : IDisposable
         var lineItem = (await lineItemResponse.Content.ReadFromJsonAsync<JobLineItemDto>(JsonOpts))!;
         Assert.Equal(savedProduct.Id, lineItem.ProductId);
         Assert.Equal(savedProduct.Name, lineItem.Title);
+        Assert.Contains(lineItem.SelectedAttributes, attribute =>
+            attribute.Key == "selected-size" && attribute.Value == "500x760");
+        Assert.Contains(lineItem.SelectedAttributes, attribute =>
+            attribute.Key == "height" && attribute.ValueType == ProductAttributeValueTypes.Number && attribute.Unit == "mm");
 
         var updateProductRequest = productRequest with
         {

@@ -62,6 +62,7 @@ public static class DependencyInjection
             new GeminiTextProvider(sp.GetRequiredService<GeminiApiClient>()));
         services.TryAddSingleton<IGenerativeImageProvider>(sp =>
             new GeminiImageProvider(sp.GetRequiredService<GeminiApiClient>()));
+        services.AddSingleton<ISupplierPageFetcher, PublicSupplierPageFetcher>();
 
         services.AddDbContext<LavariDbContext>((serviceProvider, options) =>
         {

@@ -36,6 +36,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row button { white-space: nowrap; margin: 0; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.attribute-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; border: 1px solid var(--outline); border-radius: 8px; padding: 6px 10px 10px; margin: 8px 0; }
+.attribute-row button { justify-self: start; }
 .check { display: flex; align-items: start; gap: 8px; font-weight: normal; }
 #error, #uncertain { padding: 8px; margin: 8px 0; border: 2px solid #b3261e; border-radius: 6px; }
 :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }

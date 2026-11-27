@@ -146,7 +146,27 @@
                 <LvTextField Label="RRP (e.g. 899.00)" Value="@_rrpInput" ValueChanged="v => _rrpInput = v ?? string.Empty" />
             </div>
             <LvTextField Label="Description" Multiline="true" Value="@_description" ValueChanged="v => _description = v" />
-            <LvTextField Label="Custom Attributes (one per line: Key=Value, e.g. Colour=Porcelain)" Multiline="true" Value="@_attributesText" ValueChanged="v => _attributesText = v ?? string.Empty" />
+            <div class="lv-stack">
+                <strong>Product attributes</strong>
+                @foreach (var attribute in _attributes)
+                {
+                    <div class="lv-grid-3" @key="attribute">
+                        <input class="lv-input" aria-label="Attribute label" placeholder="Label" @bind="attribute.Label" />
+                        <input class="lv-input" type="@AttributeInputType(attribute.ValueType)" step="any"
+                               aria-label="Attribute value" placeholder="Value" @bind="attribute.Value" />
+                        <select class="lv-input" aria-label="Attribute type" @bind="attribute.ValueType">
+                            <option value="text">Text</option>
+                            <option value="number">Number</option>
+                            <option value="url">URL</option>
+                            <option value="date">Date</option>
+                        </select>
+                        <input class="lv-input" aria-label="Attribute unit" placeholder="Unit (optional)" @bind="attribute.Unit" />
+                        <small>Key: @(attribute.Key)</small>
+                        <LvButton Variant="outlined" Small="true" OnClick="() => RemoveAttribute(attribute)">Remove</LvButton>
+                    </div>
+                }
+                <LvButton Variant="tonal" Small="true" OnClick="AddAttribute">Add attribute</LvButton>
+            </div>
             <LvTextField Label="Supplier image references (one URL per line)" Multiline="true" Value="@_sourceImageUrlsText" ValueChanged="v => _sourceImageUrlsText = v ?? string.Empty" />
             <small>These URLs are saved as references only; Lavari will not fetch or display them. To use an image, download it yourself and upload it through the Media Library after confirming usage rights.</small>
         </div>
@@ -196,10 +216,11 @@
             }
             <LvTextField Label="Supplier Page URL" Required="true" Value="@_capUrl" ValueChanged="v => _capUrl = v ?? string.Empty" Placeholder="https://supplier.example/product" />
             <LvTextField Label="Extraction prompt (optional)" Value="@_capPrompt" ValueChanged="v => _capPrompt = v ?? string.Empty" Placeholder="e.g. Get the current price, product image URLs, and a concise description" />
-            <LvTextField Label="Copied Page Text / Specification Blob" Required="true" Multiline="true" Rows="5" Value="@_capText" ValueChanged="v => _capText = v ?? string.Empty" />
+            <small>Page text is optional. If left blank, Lavari will try to read a public product page without signing in or following redirects. If the site blocks access, paste the product details here instead.</small>
+            <LvTextField Label="Copied Page Text / Specification Blob (optional)" Multiline="true" Rows="5" Value="@_capText" ValueChanged="v => _capText = v ?? string.Empty" />
             <label class="lv-row" style="font-size:0.86rem">
                 <input type="checkbox" @bind="_capConsent" />
-                I selected this content and confirmed it contains no supplier credentials, cookies, or unrelated private data.
+                I may use this supplier content and authorize Lavari to process it. I have not included credentials, cookies, or unrelated private data.
             </label>
             @if (_integrationStatus?.GeminiConfigured == true)
             {
@@ -211,7 +232,7 @@
                 {
                     <label class="lv-row" style="font-size:0.86rem">
                         <input type="checkbox" @bind="_capGeminiConsent" />
-                        I explicitly approve sending this selected page text and prompt to Google Gemini for extraction. I have reviewed the provider's data-handling terms.
+                        I explicitly approve sending the fetched or pasted page content and prompt to Google Gemini for extraction. I have reviewed the provider's data-handling terms.
                     </label>
                 }
             }
@@ -220,21 +241,32 @@
     <Actions>
         <LvButton Variant="outlined" OnClick="() => _showCaptureModal = false">Cancel</LvButton>
         <LvButton Loading="_saving"
-                  Disabled="@(!_capConsent || (_capUseGemini && !_capGeminiConsent) || string.IsNullOrWhiteSpace(_capUrl) || string.IsNullOrWhiteSpace(_capText))"
-                  OnClick="CapturePageAsync">@(_capUseGemini ? "Queue Gemini Extraction" : "Extract Local Draft")</LvButton>
+                  Disabled="@(!_capConsent || (_capUseGemini && !_capGeminiConsent) || string.IsNullOrWhiteSpace(_capUrl))"
+                  OnClick="CapturePageAsync">@(_capUseGemini ? "Extract with Gemini" : "Create Local Draft")</LvButton>
     </Actions>
 </LvDialog>
 
 @code {
-    private sealed record ExtractedNameValue(string? Label, string? Value);
+    private sealed class AttributeEditor
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+        public string ValueType { get; set; } = ProductAttributeValueTypes.Text;
+        public string? Unit { get; set; }
+    }
+
+    private sealed record ExtractedNameValue(string? Key, string? Label, string? Value, string? ValueType, string? Unit);
     private sealed record ExtractedDraft(
         string? Name,
         string? SupplierName,
         string? Description,
         long? CandidateRrpCents,
         string? Currency,
+        string? Sku,
         List<ExtractedNameValue>? Attributes,
         List<ExtractedNameValue>? Identifiers,
+        List<ExtractedNameValue>? CustomFields,
         List<string>? ImageUrls);
     private static ExtractedDraft? ParseDraft(string json)
     {
@@ -258,7 +290,7 @@
     private string _costInput = "0.00";
     private string _rrpInput = "0.00";
     private string? _description;
-    private string _attributesText = "Colour=Porcelain\nDimensions=W1500 x D400 x H750mm";
+    private List<AttributeEditor> _attributes = [];
     private string _sourceImageUrlsText = string.Empty;
     private Guid? _editingProductId;
     private string? _productConcurrencyToken;
@@ -319,7 +351,7 @@
         _costInput = "0.00";
         _rrpInput = "0.00";
         _description = null;
-        _attributesText = string.Empty;
+        _attributes = [];
         _sourceImageUrlsText = string.Empty;
         _showProductModal = true;
     }
@@ -337,7 +369,7 @@
         _costInput = ((decimal)product.CostCents / 100m).ToString("F2", CultureInfo.InvariantCulture);
         _rrpInput = ((decimal)product.RrpCents / 100m).ToString("F2", CultureInfo.InvariantCulture);
         _description = product.Description;
-        _attributesText = string.Join(Environment.NewLine, product.Attributes.Select(a => $"{a.Label}={a.Value}"));
+        _attributes = product.Attributes.Select(ToEditor).ToList();
         _sourceImageUrlsText = string.Join(Environment.NewLine, product.SourceImageUrls);
         _showProductModal = true;
     }
@@ -358,18 +390,41 @@
             ? ((decimal)extracted.CandidateRrpCents.Value / 100m).ToString("F2", CultureInfo.InvariantCulture)
             : "0.00";
         _description = Limit(extracted?.Description, 4000);
-        var extractedAttributes = (extracted?.Attributes ?? []).Concat(extracted?.Identifiers ?? [])
+        var extractedAttributes = (extracted?.Attributes ?? [])
+            .Concat(extracted?.Identifiers ?? [])
+            .Concat(extracted?.CustomFields ?? [])
             .Where(item => !string.IsNullOrWhiteSpace(item.Label) && !string.IsNullOrWhiteSpace(item.Value))
             .Select(item => new
             {
+                Key = ValidAttributeKey(item.Key) ? item.Key! : AttributeKey(item.Label!),
                 Label = SingleLine(item.Label!, 100),
-                Value = SingleLine(item.Value!, 500)
+                Value = SingleLine(item.Value!, 500),
+                ValueType = ProductAttributeValueTypes.IsSupported(item.ValueType) ? item.ValueType! : ProductAttributeValueTypes.Text,
+                Unit = Limit(item.Unit, 40)
             })
             .Where(item => item.Label.Length > 0 && item.Value.Length > 0)
-            .GroupBy(item => item.Label, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .Take(25);
-        _attributesText = string.Join(Environment.NewLine, extractedAttributes.Select(item => $"{item.Label}={item.Value}"));
+        _attributes = extractedAttributes.Select(item => new AttributeEditor
+        {
+            Key = item.Key,
+            Label = item.Label,
+            Value = item.Value,
+            ValueType = item.ValueType,
+            Unit = item.Unit
+        }).ToList();
+        if (!string.IsNullOrWhiteSpace(extracted?.Sku) &&
+            !_attributes.Any(attribute => attribute.Key.Equals("sku", StringComparison.OrdinalIgnoreCase)))
+        {
+            _attributes.Insert(0, new AttributeEditor
+            {
+                Key = "sku",
+                Label = "SKU",
+                Value = SingleLine(extracted.Sku, 100),
+                ValueType = ProductAttributeValueTypes.Text
+            });
+        }
         _sourceImageUrlsText = string.Join(Environment.NewLine, (extracted?.ImageUrls ?? []).Take(10));
         _showProductModal = true;
     }
@@ -399,10 +454,16 @@
         {
             var cost = Formatting.ParseMoneyInput(_costInput, _currency);
             var rrp = Formatting.ParseMoneyInput(_rrpInput, _currency);
-            var attrs = _attributesText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(line => line.Split('=', 2))
-                .Where(p => p.Length == 2 && !string.IsNullOrWhiteSpace(p[0]))
-                .Select(p => new ProductAttributeDto { Key = p[0].Trim().ToLowerInvariant(), Label = p[0].Trim(), Value = p[1].Trim() })
+            var attrs = _attributes
+                .Where(attribute => !string.IsNullOrWhiteSpace(attribute.Label) || !string.IsNullOrWhiteSpace(attribute.Value))
+                .Select(attribute => new ProductAttributeDto
+                {
+                    Key = ValidAttributeKey(attribute.Key) ? attribute.Key : AttributeKey(attribute.Label),
+                    Label = attribute.Label.Trim(),
+                    Value = attribute.Value.Trim(),
+                    ValueType = attribute.ValueType,
+                    Unit = string.IsNullOrWhiteSpace(attribute.Unit) ? null : attribute.Unit.Trim()
+                })
                 .ToArray();
 
             var request = new UpsertProductRequest
@@ -583,6 +644,51 @@
 
     private static string SingleLine(string value, int maxLength)
         => Limit(value.Replace('\r', ' ').Replace('\n', ' '), maxLength) ?? string.Empty;
+
+    private void AddAttribute()
+    {
+        if (_attributes.Count < 25)
+        {
+            _attributes.Add(new AttributeEditor());
+        }
+    }
+
+    private void RemoveAttribute(AttributeEditor attribute) => _attributes.Remove(attribute);
+
+    private static AttributeEditor ToEditor(ProductAttributeDto attribute) => new()
+    {
+        Key = attribute.Key,
+        Label = attribute.Label,
+        Value = attribute.Value,
+        ValueType = ProductAttributeValueTypes.IsSupported(attribute.ValueType)
+            ? attribute.ValueType
+            : ProductAttributeValueTypes.Text,
+        Unit = attribute.Unit
+    };
+
+    private static string AttributeInputType(string valueType) => valueType switch
+    {
+        ProductAttributeValueTypes.Number => "number",
+        ProductAttributeValueTypes.Url => "url",
+        ProductAttributeValueTypes.Date => "date",
+        _ => "text"
+    };
+
+    private static bool ValidAttributeKey(string? key)
+        => !string.IsNullOrWhiteSpace(key) && key.Length <= 80 && char.IsAsciiLetterOrDigit(key[0]) &&
+           key.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
+    private static string AttributeKey(string label)
+    {
+        var key = new string(label.ToLowerInvariant()
+            .Select(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' ? character : '-')
+            .ToArray()).Trim('-');
+        if (key.Length > 80)
+        {
+            key = key[..80].TrimEnd('-');
+        }
+        return key.Length > 0 ? key : "attribute";
+    }
 
     private async Task CapturePageAsync()
     {

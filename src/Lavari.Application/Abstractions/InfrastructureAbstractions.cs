@@ -25,6 +25,11 @@ public interface IPrivateFileStore
     Task DeleteTemporaryAsync(string storageKey, CancellationToken ct = default);
 }
 
+public interface ISupplierPageFetcher
+{
+    Task<string> FetchTextAsync(Uri sourceUri, CancellationToken ct = default);
+}
+
 public interface IRealtimeNotifier
 {
     Task NotifyRecordChangedAsync(string moduleKey, string recordType, Guid recordId, string eventType, CancellationToken ct = default);

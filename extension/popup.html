@@ -38,20 +38,20 @@
     </section>
     <section aria-labelledby="capture-title">
       <h2 id="capture-title">3. Optional page capture</h2>
-      <p>On the supplier page, select only relevant product text, then open the extension. Do not select passwords, account details or other sensitive information.</p>
-      <button id="capture" type="button" class="secondary">Capture selected text</button>
-      <label for="page-text">Selected text to send</label>
+      <p>Open the supplier product page and capture its visible rendered content. Hidden content, scripts, forms and field values are excluded. Review the captured HTML before sending; do not capture passwords, account details or unrelated private information.</p>
+      <button id="capture" type="button" class="secondary">Capture visible page HTML</button>
+      <label for="page-text">Captured page HTML or product text</label>
       <textarea id="page-text" maxlength="16000" rows="5"></textarea>
       <label for="prompt">Gemini extraction prompt</label>
       <textarea id="prompt" maxlength="4000" rows="2" placeholder="Optional instructions for Gemini." disabled></textarea>
       <label class="check"><input id="use-gemini" type="checkbox" disabled> Use Gemini to extract product details</label>
       <label id="provider-consent-label" class="check" hidden>
         <input id="provider-consent" type="checkbox">
-        I consent to send the selected text and prompt to Google Gemini for processing.
+        I consent to send the captured page content and prompt to Google Gemini for processing.
       </label>
       <p id="provider-status">Gemini extraction is not enabled for this Lavari server. Local suggestions remain available.</p>
-      <label class="check"><input id="consent" type="checkbox"> I reviewed the URL and selected text and agree to send them to Lavari.</label>
-      <button id="analyze" type="button" class="secondary">Process selected text</button>
+      <label class="check"><input id="consent" type="checkbox"> I reviewed the URL and captured page content and agree to send them to Lavari.</label>
+      <button id="analyze" type="button" class="secondary">Process supplier page</button>
       <button id="check-extraction" type="button" class="secondary" hidden>Check Gemini extraction</button>
     </section>
     <form id="line-form">
@@ -61,7 +61,8 @@
       <label for="source">Source URL</label><input id="source" type="url" maxlength="2000">
       <label for="description">Description</label><textarea id="description" rows="2"></textarea>
       <label for="room">Room or area</label><input id="room">
-      <label for="attributes">Attributes (one per line: label | value | optional unit)</label><textarea id="attributes" rows="2"></textarea>
+      <div id="attributes" class="attribute-editor" aria-label="Selected product attributes"></div>
+      <button id="add-attribute" type="button" class="secondary">Add attribute</button>
       <label for="requirements">Requirements</label><textarea id="requirements" rows="2"></textarea>
       <div class="grid">
         <div><label for="quantity">Quantity</label><input id="quantity" inputmode="decimal" value="1" required></div>

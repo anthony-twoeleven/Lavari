@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using Lavari.Application.Abstractions;
 using Lavari.Application.Locking;
 using Lavari.Application.Services;
@@ -109,6 +110,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
             CostCents = request.CostCents,
             RrpCents = request.RrpCents,
             PriceObservedAtUtc = _timeProvider.GetUtcNow(),
+            AttributesSchemaVersion = 2,
             AttributesJson = JsonSerializer.Serialize(request.Attributes, JsonOpts),
             VariantIdentifierKeysJson = JsonSerializer.Serialize(request.VariantIdentifierKeys, JsonOpts),
             SourceImageUrlsJson = JsonSerializer.Serialize(request.SourceImageUrls, JsonOpts),
@@ -143,6 +145,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         entity.CostCents = request.CostCents;
         entity.RrpCents = request.RrpCents;
         entity.PriceObservedAtUtc = _timeProvider.GetUtcNow();
+        entity.AttributesSchemaVersion = 2;
         entity.AttributesJson = JsonSerializer.Serialize(request.Attributes, JsonOpts);
         entity.VariantIdentifierKeysJson = JsonSerializer.Serialize(request.VariantIdentifierKeys, JsonOpts);
         entity.SourceImageUrlsJson = JsonSerializer.Serialize(request.SourceImageUrls, JsonOpts);
@@ -181,6 +184,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         var currency = MoneyCents.NormalizeAndValidateCurrency(request.Currency);
         _ = new MoneyCents(request.CostCents, currency);
         _ = new MoneyCents(request.RrpCents, currency);
+        ValidateAttributes(request.Attributes);
 
         if (!await _db.Products.AnyAsync(p => p.Id == productId, ct))
         {
@@ -364,14 +368,7 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         _ = new MoneyCents(request.CostCents, currency);
         _ = new MoneyCents(request.RrpCents, currency);
 
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var attr in request.Attributes)
-        {
-            if (string.IsNullOrWhiteSpace(attr.Key) || !seenKeys.Add(attr.Key.Trim()))
-            {
-                throw new ValidationServiceException($"Duplicate or blank attribute key '{attr.Key}'.");
-            }
-        }
+        ValidateAttributes(request.Attributes);
 
         if (request.SourceImageUrls is null || request.SourceImageUrls.Count > 10 || request.SourceImageUrls.Any(url =>
                 string.IsNullOrWhiteSpace(url) || url.Length > 2000 ||
@@ -397,7 +394,53 @@ public sealed class ProductAndLineItemService : IProductAndLineItemService
         _ = new MoneyCents(request.CostCents, currency);
         _ = new MoneyCents(request.RrpCents, currency);
         _ = new MoneyCents(request.UnitSellPriceCents, currency);
+        ValidateAttributes(request.SelectedAttributes);
     }
+
+    private static void ValidateAttributes(IReadOnlyList<ProductAttributeDto>? attributes)
+    {
+        if (attributes is null || attributes.Count > 25)
+        {
+            throw new ValidationServiceException("A record may contain at most 25 product attributes.");
+        }
+
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in attributes)
+        {
+            if (attribute is null ||
+                !ValidAttributeKey(attribute.Key) ||
+                !seenKeys.Add(attribute.Key) ||
+                string.IsNullOrWhiteSpace(attribute.Label) || attribute.Label.Length > 100 ||
+                attribute.Label.Contains('\n') || attribute.Label.Contains('\r') ||
+                string.IsNullOrWhiteSpace(attribute.Value) || attribute.Value.Length > 500 ||
+                attribute.Value.Contains('\n') || attribute.Value.Contains('\r') ||
+                attribute.Unit?.Length > 40 ||
+                !ProductAttributeValueTypes.IsSupported(attribute.ValueType) ||
+                !ValidAttributeValue(attribute.ValueType, attribute.Value))
+            {
+                throw new ValidationServiceException(
+                    "Product attributes must have unique keys and valid labels, values, units, and types.");
+            }
+        }
+    }
+
+    private static bool ValidAttributeKey(string key)
+        => !string.IsNullOrWhiteSpace(key) && key.Length <= 80 &&
+           char.IsAsciiLetterOrDigit(key[0]) &&
+           key.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
+    private static bool ValidAttributeValue(string valueType, string value)
+        => valueType switch
+        {
+            ProductAttributeValueTypes.Text => true,
+            ProductAttributeValueTypes.Number => decimal.TryParse(
+                value, NumberStyles.Float, CultureInfo.InvariantCulture, out _),
+            ProductAttributeValueTypes.Url => Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+                uri.Scheme is "http" or "https" && string.IsNullOrEmpty(uri.UserInfo),
+            ProductAttributeValueTypes.Date => DateOnly.TryParseExact(
+                value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
+            _ => false
+        };
 
     private static ProductDto MapProduct(ProductEntity p, string? dupWarning) => new()
     {

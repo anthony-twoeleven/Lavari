@@ -27,6 +27,7 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"lavari-gemini-direct-{Guid.NewGuid():N}");
     private readonly TestTextProvider _provider = new();
+    private readonly TestSupplierPageFetcher _pageFetcher = new();
     private readonly WebApplicationFactory<Program> _factory;
 
     public GeminiDirectCallIntegrationTests()
@@ -54,6 +55,8 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
                 {
                     services.RemoveAll<IGenerativeTextProvider>();
                     services.AddSingleton<IGenerativeTextProvider>(_provider);
+                    services.RemoveAll<ISupplierPageFetcher>();
+                    services.AddSingleton<ISupplierPageFetcher>(_pageFetcher);
                 });
             });
     }
@@ -80,8 +83,8 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
         var response = await admin.PostAsJsonAsync("/api/integrations/supplier-capture", new SupplierCaptureRequest
         {
             SourceUrl = "https://supplier.example/magnus",
-            PageTextContent = $"Magnus Console Table\nRRP AUD $2,275.00\nPorcelain top\n{imageUrl}\nPrivate supplier detail",
-            Prompt = "Extract the price, image URL and concise description.",
+            PageTextContent = string.Empty,
+            Prompt = "Extract the price, image URL, concise description and selected finish.",
             UseGemini = true,
             UserConfirmedConsent = true,
             UserConfirmedProviderConsent = true
@@ -90,16 +93,21 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
         var result = (await response.Content.ReadFromJsonAsync<LlmExtractionDraftDto>(JsonOptions))!;
         Assert.Equal("PendingReview", result.Status);
         Assert.Equal("Gemini", result.ProviderName);
+        Assert.Equal(1, _pageFetcher.FetchCount);
+        Assert.Equal("https://supplier.example/magnus", _pageFetcher.LastUri?.AbsoluteUri);
         Assert.NotNull(result.ProviderConsentGrantedAtUtc);
         Assert.NotNull(_provider.Request);
         using (var extracted = JsonDocument.Parse(result.ExtractedJson))
         {
             Assert.Equal("Magnus Console Table", extracted.RootElement.GetProperty("name").GetString());
+            Assert.Equal("MCT-001", extracted.RootElement.GetProperty("sku").GetString());
+            Assert.Equal("selectedfinish", extracted.RootElement.GetProperty("customFields")[0].GetProperty("key").GetString());
             Assert.Equal(imageUrl, extracted.RootElement.GetProperty("imageUrls")[0].GetString());
             Assert.True(extracted.RootElement.GetProperty("requiresUserReview").GetBoolean());
         }
 
         Assert.Contains("Private supplier detail", _provider.Request!.Input);
+        Assert.Contains(imageUrl, _provider.Request.Input);
         await using var auditScope = _factory.Services.CreateAsyncScope();
         var db = auditScope.ServiceProvider.GetRequiredService<LavariDbContext>();
         var reservation = await db.AiSpendReservations.SingleAsync();
@@ -140,6 +148,7 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
         });
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         Assert.DoesNotContain("provider-private-failure", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, _pageFetcher.FetchCount);
 
         await using var scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<LavariDbContext>();
@@ -211,14 +220,32 @@ public sealed class GeminiDirectCallIntegrationTests : IDisposable
                     description = "Console table with porcelain top.",
                     candidateRrpCents = 227500,
                     currency = "AUD",
-                    attributes = new[] { new { label = "Top", value = "Porcelain" } },
+                    sku = "MCT-001",
+                    attributes = new[] { new { key = "top", label = "Top", value = "Porcelain", valueType = "text", unit = (string?)null } },
                     identifiers = Array.Empty<object>(),
+                    customFields = new[] { new { key = "selectedfinish", label = "Selected finish", value = "Porcelain", valueType = "text", unit = (string?)null } },
                     imageUrls = new[] { "https://images.example.test/magnus.jpg?width=600" }
                 }),
                 InputTokens = 120,
                 OutputTokens = 35,
                 TotalTokens = 155
             });
+        }
+
+    }
+
+    private sealed class TestSupplierPageFetcher : ISupplierPageFetcher
+    {
+        public int FetchCount { get; private set; }
+        public Uri? LastUri { get; private set; }
+
+        public Task<string> FetchTextAsync(Uri sourceUri, CancellationToken ct = default)
+        {
+            FetchCount++;
+            LastUri = sourceUri;
+            return Task.FromResult(
+                "Magnus Console Table\nRRP AUD $2,275.00\nPorcelain top\n" +
+                "https://images.example.test/magnus.jpg?width=600\nPrivate supplier detail");
         }
     }
 }

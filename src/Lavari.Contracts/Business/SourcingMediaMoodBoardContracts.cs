@@ -7,7 +7,19 @@ public sealed record ProductAttributeDto
     public required string Key { get; init; }
     public required string Label { get; init; }
     public required string Value { get; init; }
+    public string ValueType { get; init; } = ProductAttributeValueTypes.Text;
     public string? Unit { get; init; }
+}
+
+public static class ProductAttributeValueTypes
+{
+    public const string Text = "text";
+    public const string Number = "number";
+    public const string Url = "url";
+    public const string Date = "date";
+
+    public static bool IsSupported(string? value)
+        => value is Text or Number or Url or Date;
 }
 
 public sealed record ProductVariantDto

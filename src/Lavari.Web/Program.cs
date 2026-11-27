@@ -96,6 +96,11 @@ await using (var scope = app.Services.CreateAsyncScope())
         builder.Configuration["Lavari:SuperAdminEmail"],
         builder.Configuration["Lavari:SuperAdminPassword"],
         templatesDir);
+
+    if (app.Environment.IsDevelopment())
+    {
+        await seeder.SeedDevelopmentClientsAsync();
+    }
 }
 
 app.MapDefaultEndpoints();

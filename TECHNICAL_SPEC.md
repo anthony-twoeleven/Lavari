@@ -1168,18 +1168,28 @@ test restoration.
 
 ## Supplier capture and LLM-assisted extraction
 
-The proposed browser companion operates only on a user-initiated capture of
-the page currently visible to the user, including a supplier session already
-authenticated in that browser. Request only necessary browser permissions,
-show which data will be captured and sent, and require confirmation. Do not
-collect or transmit cookies, credentials, authorization headers, browser
-storage, hidden account information or unrelated page content. Avoid
+The browser companion operates only on a user-initiated capture of rendered
+content from the active supplier tab, including the supplier's signed-in view.
+Capture a bounded sanitized HTML fragment from rendered DOM; exclude hidden
+content, scripts, styles, forms, controls, field values and unrelated browser
+storage. Strip all attributes except safe image `src` and `alt` references.
+Request only necessary browser permissions, show which data will be captured
+and sent, and require confirmation. Do not collect or transmit cookies,
+credentials, authorization headers, browser storage, hidden account
+information or unrelated page content. Avoid
 server-side login, session impersonation, bypassing access controls or
-unrestricted URL fetching; support manual entry if extraction is not
-permitted or possible. Respect supplier terms, access restrictions,
-copyright and privacy. Treat captured HTML and links as untrusted; sanitize
-content, validate links, and protect any server-side image retrieval against
-SSRF, redirects and private network targets.
+unrestricted URL fetching. The authenticated supplier-capture flow may make
+one user-initiated GET to the entered product URL only when it is a public
+HTTP(S) destination on its default port. Do not send cookies or credentials,
+use a proxy, or follow redirects. Resolve and pin the destination address at
+connection time, rejecting private, loopback, link-local, reserved and
+otherwise non-public addresses. Bound the request to 12 seconds and 1 MB of
+HTML, extract at most 16,000 characters of text and image references, and
+never fetch linked resources. Require user confirmation before retrieval and
+separate provider consent before sending content to an LLM. Support manual
+text entry if the site blocks access or requires a logged-in session. Respect
+supplier terms, access restrictions, copyright and privacy. Treat captured
+HTML and links as untrusted; sanitize content and validate links.
 
 Map the selected page to a versioned draft product configuration with source,
 candidate identifiers, attributes, price/currency, images, requirements and
@@ -1189,12 +1199,22 @@ explicitly saves the draft. No extracted value, including pricing or variant,
 is authoritative without review. If capture or model extraction fails, keep
 manual entry available and report an actionable error.
 
+Gemini supplier extraction always requests the standard product fields
+supported by the catalog, including name, description, explicitly stated RRP
+and currency, SKU, identifiers, product attributes and image references. The
+user's optional prompt supplements those fields and populates a separate
+collection of custom fields, such as a selected size or finish, only when
+supported by the captured page. Every attribute carries a stable key, display
+label, string value, type (`text`, `number`, `url` or ISO date) and optional
+unit. Keep these values in the versioned JSON-backed attribute collections;
+review them in editable typed inputs and preserve them when adding a line item.
+
 For local supplier drafts, acceptance must create the editable global product
 and transition the draft to Approved atomically, guarded by the draft's
 concurrency token and the user's Supplier Capture and Product Catalog grants.
 Retain supplier-provided image URLs as inert source references only unless a
 user explicitly imports an image through the shared image pipeline after
-rights review; do not fetch or render untrusted URLs. Adding an accepted
+rights review; do not fetch or render these untrusted image URLs. Adding an accepted
 catalog product to a job is a separate, authorized job-line-item operation
 under the job's exclusive edit lease, preserving job-specific values.
 
@@ -1370,8 +1390,9 @@ incrementally as needed rather than attempting to recreate all of Material 3.
 
 Use `prefers-color-scheme` and respond to preference changes for light and
 dark tokens; maintain contrast and accessibility in both themes. Account
-appearance settings offer System, Light and Dark modes and static Purple,
-Green, Coral, Blue and Neutral palettes with coordinated primary, secondary,
+appearance settings offer System, Light and Dark modes and static Muted Plum,
+Sage & Eucalyptus, Terracotta & Blush, Slate & Nordic Dusk, and Warm Stone &
+Charcoal palettes with coordinated primary, secondary,
 tertiary and surface roles in both themes. Store settings per user, default to
 System and Purple, and require the registered account
 appearance Read/Alter permission for self-service reads/updates. Persist and
@@ -1478,9 +1499,11 @@ logging satisfy the same application security requirements.
 
 External systems use adapters behind application-owned interfaces. Define
 authentication, timeouts, retry/idempotency, data mapping, auditing and
-observability for each integration before enabling it. Never assume a remote
-operation participates in the local database transaction; use an outbox or
-another explicit consistency mechanism when needed.
+observability for each integration before enabling it. Keep provider failure
+diagnostics to bounded status/classification metadata; never log credentials
+or submitted supplier content. Never assume a remote operation participates
+in the local database transaction; use an outbox or another explicit
+consistency mechanism when needed.
 
 ## Validation and delivery
 

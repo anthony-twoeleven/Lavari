@@ -19,6 +19,29 @@ public sealed class DatabaseSeeder
     public const string DesignerRoleName = "Interior Designer";
     public const string ReadOnlyRoleName = "Read Only";
     public const string LlmPrincipalEmail = "llm-extractor@system.lavari.local";
+    private const string LegacyDevelopmentClientName = "Sydney Harbour Developments";
+
+    private static readonly (string Name, (string Name, string[] Jobs)[] Groups)[] DevelopmentClientSeeds =
+    [
+        ("Aster Design Studio",
+        [
+            ("Balmain Residences", ["Balmain Terrace Renovation"])
+        ]),
+        ("Harbourline Developments",
+        [
+            ("North Shore Apartments", ["Mosman Penthouse"]),
+            ("Eastern Suburbs Homes", ["Paddington Terrace"])
+        ]),
+        ("Northstar Property Group",
+        [
+            ("Inner West Projects", ["Newtown Terrace", "Enmore Courtyard", "Marrickville Studio", "Dulwich Hill Cottage"]),
+            ("Lower North Shore Projects", ["Cremorne Apartment", "Neutral Bay Townhouse", "Kirribilli Residence", "Waverton Loft"]),
+            ("Eastern Suburbs Projects", ["Coogee Family Home", "Bondi Apartment", "Bronte Cottage", "Randwick Terrace"]),
+            ("Northern Beaches Projects", ["Manly Coastal Home", "Freshwater Bungalow", "Curl Curl Residence", "Dee Why Apartment"]),
+            ("City Projects", ["Surry Hills Warehouse", "Darlinghurst Apartment", "Pyrmont Loft", "Chippendale Studio"]),
+            ("Southern Projects", ["Cronulla Beach House", "Kogarah Family Home", "Oatley Residence", "Sutherland Cottage"])
+        ])
+    ];
 
     private readonly LavariDbContext _db;
     private readonly IPasswordHasher _passwordHasher;
@@ -26,6 +49,7 @@ public sealed class DatabaseSeeder
     private readonly IIdGenerator _ids;
     private readonly ILogger<DatabaseSeeder> _logger;
     private readonly IConfiguration? _configuration;
+    private readonly TimeProvider _timeProvider;
 
     public DatabaseSeeder(
         LavariDbContext db,
@@ -33,7 +57,8 @@ public sealed class DatabaseSeeder
         IPrivateFileStore fileStore,
         IIdGenerator ids,
         ILogger<DatabaseSeeder> logger,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        TimeProvider? timeProvider = null)
     {
         _db = db;
         _passwordHasher = passwordHasher;
@@ -41,6 +66,7 @@ public sealed class DatabaseSeeder
         _ids = ids;
         _logger = logger;
         _configuration = configuration;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task SeedAsync(
@@ -65,6 +91,113 @@ public sealed class DatabaseSeeder
         if (!string.IsNullOrWhiteSpace(templatesDirectory) && Directory.Exists(templatesDirectory))
         {
             await SeedDocumentTemplatesAsync(templatesDirectory, ct);
+        }
+    }
+
+    public async Task SeedDevelopmentClientsAsync(CancellationToken ct = default)
+    {
+        var seedNames = DevelopmentClientSeeds.Select(seed => seed.Name).ToArray();
+        var existingSeeds = await _db.Clients.IgnoreQueryFilters()
+            .Where(client => client.DeletedAtUtc == null && seedNames.Contains(client.Name))
+            .ToListAsync(ct);
+
+        if (existingSeeds.Count != 0 && existingSeeds.Count != DevelopmentClientSeeds.Length)
+        {
+            throw new InvalidOperationException("Development client seed data is incomplete; refusing to create duplicate sample records.");
+        }
+
+        var legacyClients = await _db.Clients.IgnoreQueryFilters()
+            .Where(client => client.DeletedAtUtc == null && client.Name == LegacyDevelopmentClientName)
+            .Include(client => client.JobGroups.Where(group => group.DeletedAtUtc == null))
+            .ThenInclude(group => group.Jobs.Where(job => job.DeletedAtUtc == null))
+            .ToListAsync(ct);
+
+        if (existingSeeds.Count == DevelopmentClientSeeds.Length)
+        {
+            if (legacyClients.Count > 0)
+            {
+                SoftDeleteLegacyDevelopmentClients(legacyClients);
+                await _db.SaveChangesAsync(ct);
+            }
+            return;
+        }
+
+        var hasUnrelatedActiveClients = await _db.Clients.IgnoreQueryFilters()
+            .AnyAsync(client =>
+                client.DeletedAtUtc == null &&
+                client.Name != LegacyDevelopmentClientName &&
+                !seedNames.Contains(client.Name),
+                ct);
+        if (hasUnrelatedActiveClients)
+        {
+            _logger.LogWarning("Skipped development client seeds because active non-seed clients already exist.");
+            return;
+        }
+
+        if (legacyClients.Count > 0)
+        {
+            SoftDeleteLegacyDevelopmentClients(legacyClients);
+        }
+
+        foreach (var clientSeed in DevelopmentClientSeeds)
+        {
+            var client = new ClientEntity
+            {
+                Id = _ids.NewId(),
+                Name = clientSeed.Name
+            };
+            _db.Clients.Add(client);
+
+            foreach (var groupSeed in clientSeed.Groups)
+            {
+                var group = new JobGroupEntity
+                {
+                    Id = _ids.NewId(),
+                    ClientId = client.Id,
+                    Name = groupSeed.Name
+                };
+                _db.JobGroups.Add(group);
+
+                foreach (var jobName in groupSeed.Jobs)
+                {
+                    _db.Jobs.Add(new JobEntity
+                    {
+                        Id = _ids.NewId(),
+                        ClientId = client.Id,
+                        JobGroupId = group.Id,
+                        Name = jobName
+                    });
+                }
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Seeded {ClientCount} development clients, {GroupCount} folders, and {JobCount} jobs.",
+            DevelopmentClientSeeds.Length,
+            DevelopmentClientSeeds.Sum(seed => seed.Groups.Length),
+            DevelopmentClientSeeds.Sum(seed => seed.Groups.Sum(group => group.Jobs.Length)));
+    }
+
+    private void SoftDeleteLegacyDevelopmentClients(IEnumerable<ClientEntity> clients)
+    {
+        var now = _timeProvider.GetUtcNow();
+        foreach (var client in clients)
+        {
+            foreach (var group in client.JobGroups)
+            {
+                foreach (var job in group.Jobs)
+                {
+                    job.DeletedAtUtc = now;
+                    job.DeletedBy = "system";
+                }
+
+                group.DeletedAtUtc = now;
+                group.DeletedBy = "system";
+            }
+
+            client.DeletedAtUtc = now;
+            client.DeletedBy = "system";
         }
     }
 

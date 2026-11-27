@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Collections.Immutable;
 using Lavari.Application.Abstractions;
+using Lavari.Contracts.Business;
 using Lavari.Domain.Errors;
 using Lavari.Domain.Security;
 using Lavari.Infrastructure;
@@ -157,9 +158,22 @@ public sealed class GeminiProviderTests
         }));
         var provider = new GeminiTextProvider(client);
         var error = await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() => provider.GenerateAsync(Request()));
+        Assert.Equal("The AI provider was unavailable or returned an invalid response.", error.UserMessage);
+        Assert.Equal("Gemini API returned HTTP 429.", error.TechnicalDetails);
         Assert.DoesNotContain("sensitive", error.ToString());
         Assert.DoesNotContain("test-key", error.ToString());
         Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task Provider_ReportsSafeCandidateFinishReason()
+    {
+        using var client = new GeminiApiClient("test-key", new StubHandler(_ =>
+            Task.FromResult(JsonResponse("""{"candidates":[{"finishReason":"SAFETY","content":{"parts":[{"text":"blocked"}]}}]}"""))));
+        var error = await Assert.ThrowsAsync<ExternalIntegrationServiceException>(
+            () => new GeminiTextProvider(client).GenerateAsync(Request()));
+        Assert.Equal("Gemini API generation ended with finish reason SAFETY.", error.TechnicalDetails);
+        Assert.DoesNotContain("blocked", error.ToString());
     }
 
     [Fact]
@@ -201,14 +215,21 @@ public sealed class GeminiProviderTests
     [Fact]
     public async Task Extractor_ReturnsReviewedSuggestionsWithoutGuessingCurrency()
     {
-        var fake = new FakeProvider("""{"name":"Chair","description":null,"candidateRrpCents":12500,"currency":"AUD","attributes":[{"label":"Finish","value":"Black"}],"identifiers":[{"label":"SKU","value":"A-12"}],"imageUrls":["https://images.example.test/chair.png"]}""");
-        var result = await new SupplierPageTextExtractor(fake).ExtractAsync("model", "Chair $125 AUD https://images.example.test/chair.png", "Find finish");
+        var fake = new FakeProvider("""{"name":"Chair","description":null,"candidateRrpCents":12500,"currency":"AUD","sku":"A-12","attributes":[{"key":"finish","label":"Finish","value":"Black","valueType":"text","unit":null},{"key":"height","label":"Height","value":"760","valueType":"number","unit":"mm"}],"identifiers":[{"key":"material","label":"Material","value":"Timber","valueType":"text","unit":null}],"customFields":[{"key":"selectedsize","label":"Selected size","value":"500x760","valueType":"text","unit":null}],"imageUrls":["https://images.example.test/chair.png"]}""");
+        var result = await new SupplierPageTextExtractor(fake).ExtractAsync(
+            "model", new Uri("https://supplier.example/chair?variant=large&session_token=private"),
+            "Chair $125 AUD https://images.example.test/chair.png", "Find finish and size");
         Assert.Equal(12500, result.Suggestion.CandidateRrpCents);
         Assert.Equal("Black", result.Suggestion.Attributes[0].Value);
-        Assert.Equal("A-12", result.Suggestion.Identifiers[0].Value);
+        Assert.Equal(ProductAttributeValueTypes.Number, result.Suggestion.Attributes[1].ValueType);
+        Assert.Equal("A-12", result.Suggestion.Sku);
+        Assert.Equal("Timber", result.Suggestion.Identifiers[0].Value);
+        Assert.Equal("500x760", result.Suggestion.CustomFields[0].Value);
         Assert.Equal("https://images.example.test/chair.png", result.Suggestion.ImageUrls[0]);
         Assert.Contains("untrusted", fake.Request!.SystemInstruction);
         Assert.Contains("Chair $125 AUD", fake.Request.Input);
+        Assert.Contains("variant=large", fake.Request.Input);
+        Assert.DoesNotContain("session_token", fake.Request.Input);
     }
 
     [Fact]
@@ -218,31 +239,35 @@ public sealed class GeminiProviderTests
         var response = JsonSerializer.Serialize(new
         {
             name = "Chair", description = (string?)null, candidateRrpCents = (long?)null, currency = (string?)null,
-            attributes = Array.Empty<object>(), identifiers = Array.Empty<object>(), imageUrls = new[] { imageUrl }
+            sku = (string?)null, attributes = Array.Empty<object>(), identifiers = Array.Empty<object>(),
+            customFields = Array.Empty<object>(), imageUrls = new[] { imageUrl }
         });
         var result = await new SupplierPageTextExtractor(new FakeProvider(response))
-            .ExtractAsync("model", $"Chair {imageUrl}", "Extract the product details");
+            .ExtractAsync("model", new Uri("https://supplier.example/chair"), $"Chair {imageUrl}", "Extract the product details");
         Assert.Equal(imageUrl, Assert.Single(result.Suggestion.ImageUrls));
     }
 
     [Theory]
-    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":12500,"currency":null,"attributes":[],"identifiers":[],"imageUrls":[]}""")]
-    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":1,"currency":"JPY","attributes":[],"identifiers":[],"imageUrls":[]}""")]
-    [InlineData("""{"name":"Chair","name":"Other","description":null,"candidateRrpCents":null,"currency":null,"attributes":[],"identifiers":[],"imageUrls":[]}""")]
-    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":9007199254740992,"currency":"AUD","attributes":[],"identifiers":[],"imageUrls":[]}""")]
-    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":null,"currency":null,"attributes":[],"identifiers":[],"imageUrls":[],"extra":"x"}""")]
-    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":null,"currency":null,"attributes":[],"identifiers":[{"label":"","value":"A-12"}],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":12500,"currency":null,"sku":null,"attributes":[],"identifiers":[],"customFields":[],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":1,"currency":"JPY","sku":null,"attributes":[],"identifiers":[],"customFields":[],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","name":"Other","description":null,"candidateRrpCents":null,"currency":null,"sku":null,"attributes":[],"identifiers":[],"customFields":[],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":9007199254740992,"currency":"AUD","sku":null,"attributes":[],"identifiers":[],"customFields":[],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":null,"currency":null,"sku":null,"attributes":[],"identifiers":[],"customFields":[],"imageUrls":[],"extra":"x"}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":null,"currency":null,"sku":null,"attributes":[],"identifiers":[{"key":"bad key","label":"","value":"A-12","valueType":"text","unit":null}],"customFields":[],"imageUrls":[]}""")]
+    [InlineData("""{"name":"Chair","description":null,"candidateRrpCents":null,"currency":null,"sku":null,"attributes":[{"key":"size","label":"Size","value":"500x760","valueType":"number","unit":"mm"}],"identifiers":[],"customFields":[],"imageUrls":[]}""")]
     public async Task Extractor_RejectsUntrustedInvalidOutput(string output)
     {
         var extractor = new SupplierPageTextExtractor(new FakeProvider(output));
-        await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() => extractor.ExtractAsync("model", "page", "prompt"));
+        await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() =>
+            extractor.ExtractAsync("model", new Uri("https://supplier.example/item"), "page", "prompt"));
     }
 
     [Fact]
     public async Task Extractor_RejectsOversizedOutputFromAnyProvider()
     {
         var extractor = new SupplierPageTextExtractor(new FakeProvider(new string('x', 20001)));
-        await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() => extractor.ExtractAsync("model", "page", "prompt"));
+        await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() =>
+            extractor.ExtractAsync("model", new Uri("https://supplier.example/item"), "page", "prompt"));
     }
 
     [Theory]
@@ -256,11 +281,13 @@ public sealed class GeminiProviderTests
         var response = JsonSerializer.Serialize(new
         {
             name = "Chair", description = (string?)null, candidateRrpCents = (long?)null, currency = (string?)null,
-            attributes = Array.Empty<object>(), identifiers = Array.Empty<object>(), imageUrls = new[] { imageUrl }
+            sku = (string?)null, attributes = Array.Empty<object>(), identifiers = Array.Empty<object>(),
+            customFields = Array.Empty<object>(), imageUrls = new[] { imageUrl }
         });
         var page = includeInPage ? $"Chair {imageUrl}" : "Chair";
         await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() =>
-            new SupplierPageTextExtractor(new FakeProvider(response)).ExtractAsync("model", page, "Find images"));
+            new SupplierPageTextExtractor(new FakeProvider(response)).ExtractAsync(
+                "model", new Uri("https://supplier.example/item"), page, "Find images"));
     }
 
     [Fact]

@@ -99,9 +99,11 @@ relevant features are implemented.
   item; do not assume one product type's attributes apply to every other type.
 - Support capturing information from a supplier page, including a
   user-authenticated supplier session. A proposed browser companion extracts
-  selected page content, and an optional LLM suggests structured details.
-  The designer reviews and corrects the result before saving. Manual entry
-  remains available for unsupported sites, cost control and accuracy.
+  selected page content, and an optional LLM suggests standard product details
+  plus prompt-requested custom fields. The designer reviews and edits typed
+  attributes before saving; the browser companion carries those attributes
+  into job line items. Manual entry remains available for unsupported sites,
+  cost control and accuracy.
 - Provide an image library for uploading and finding reusable images across
   the firm, with filters for associated clients and jobs. Access to linked
   images and associations remains permission-controlled.
@@ -207,7 +209,8 @@ system and integration activity, is attributable to a named actor.
 - Follow the device's light or dark preference, including changes while the
   application is open. Do not rely on color alone to convey state.
 - Account appearance offers System (default), Light and Dark modes and static
-  Purple, Green, Coral, Blue and Neutral palettes with coordinated primary,
+  Muted Plum, Sage & Eucalyptus, Terracotta & Blush, Slate & Nordic Dusk, and
+  Warm Stone & Charcoal palettes with coordinated primary,
   secondary, tertiary and surface roles in both themes. Save preferences per
   user, preview them in selectable cards before saving, and apply them across
   devices. Require an explicit account appearance grant; audit and

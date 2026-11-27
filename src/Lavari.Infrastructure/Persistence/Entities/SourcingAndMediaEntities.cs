@@ -12,7 +12,7 @@ public sealed class ProductEntity : AuditableSoftDeletableEntity
     public long CostCents { get; set; }
     public long RrpCents { get; set; }
     public DateTimeOffset? PriceObservedAtUtc { get; set; }
-    public int AttributesSchemaVersion { get; set; } = 1;
+    public int AttributesSchemaVersion { get; set; } = 2;
     public string AttributesJson { get; set; } = "[]";
     public string VariantIdentifierKeysJson { get; set; } = "[]";
     public string SourceImageUrlsJson { get; set; } = "[]";

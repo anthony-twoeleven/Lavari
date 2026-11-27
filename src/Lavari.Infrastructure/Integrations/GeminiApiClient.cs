@@ -49,8 +49,10 @@ internal sealed partial class GeminiApiClient : IDisposable
         try
         {
             using var response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > maxResponseBytes)
-                throw Failure();
+            if (!response.IsSuccessStatusCode)
+                throw Failure($"Gemini API returned HTTP {(int)response.StatusCode}.");
+            if (response.Content.Headers.ContentLength > maxResponseBytes)
+                throw Failure("Gemini API response exceeded the configured size limit.");
 
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var buffer = new MemoryStream();
@@ -59,7 +61,7 @@ internal sealed partial class GeminiApiClient : IDisposable
             while ((count = await stream.ReadAsync(chunk, timeout.Token)) != 0)
             {
                 if (buffer.Length + count > maxResponseBytes)
-                    throw Failure();
+                    throw Failure("Gemini API response exceeded the configured size limit.");
                 buffer.Write(chunk, 0, count);
             }
 
@@ -68,19 +70,19 @@ internal sealed partial class GeminiApiClient : IDisposable
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw Failure();
+            throw Failure("Gemini API request timed out.");
         }
         catch (HttpRequestException)
         {
-            throw Failure();
+            throw Failure("Gemini API request failed due to a transport error.");
         }
         catch (IOException)
         {
-            throw Failure();
+            throw Failure("Gemini API response could not be read.");
         }
         catch (JsonException)
         {
-            throw Failure();
+            throw Failure("Gemini API response was not valid JSON.");
         }
     }
 
@@ -88,12 +90,22 @@ internal sealed partial class GeminiApiClient : IDisposable
     {
         if (!root.TryGetProperty("candidates", out var candidates) || candidates.ValueKind != JsonValueKind.Array ||
             candidates.GetArrayLength() != 1)
-            throw Failure();
+            throw Failure("Gemini API response did not contain exactly one candidate.");
         var candidate = candidates[0];
-        if (!candidate.TryGetProperty("finishReason", out var finish) || finish.GetString() != "STOP" ||
-            !candidate.TryGetProperty("content", out var content) ||
+        if (!candidate.TryGetProperty("finishReason", out var finish) || finish.ValueKind != JsonValueKind.String)
+            throw Failure("Gemini API response did not include a valid finish reason.");
+        var finishReason = finish.GetString();
+        if (finishReason != "STOP")
+        {
+            var detail = finishReason is not null && finishReason.Length <= 32 &&
+                         finishReason.All(c => c is >= 'A' and <= 'Z' or '_')
+                ? $"Gemini API generation ended with finish reason {finishReason}."
+                : "Gemini API generation ended without a valid finish reason.";
+            throw Failure(detail);
+        }
+        if (!candidate.TryGetProperty("content", out var content) ||
             !content.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
-            throw Failure();
+            throw Failure("Gemini API response did not contain valid candidate content.");
         return parts;
     }
 
@@ -106,9 +118,10 @@ internal sealed partial class GeminiApiClient : IDisposable
         return count;
     }
 
-    public static ExternalIntegrationServiceException Failure() => new(
+    public static ExternalIntegrationServiceException Failure(string? technicalDetails = null) => new(
         "The AI provider was unavailable or returned an invalid response.",
-        possibleCause: "Check the integration configuration or use manual entry.");
+        possibleCause: "Check the integration configuration or use manual entry.",
+        technicalDetails: technicalDetails);
 
     public void Dispose() => _client.Dispose();
 }

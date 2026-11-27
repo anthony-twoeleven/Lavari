@@ -216,16 +216,16 @@ public sealed class PersistenceAndLockingTests : IDisposable
             reservations.ReserveAsync(requestId, fingerprint, null, null, "Gemini\n", "text-model"));
         await Assert.ThrowsAsync<ValidationServiceException>(() =>
             reservations.ReserveAsync(requestId, fingerprint, null, null, "Gemini", "text-model\n"));
+        await SetBudgetVariablesAsync(db, ids, ("Ai.DailyLimitCents", "0"));
         await Assert.ThrowsAsync<ExternalIntegrationServiceException>(() =>
             reservations.ReserveAsync(requestId, fingerprint, null, null, "Gemini", "text-model"));
 
-        db.ApplicationVariables.AddRange(
-            BudgetVariable("Ai.SpendCurrency", "AUD", ids),
-            BudgetVariable("Ai.DailyLimitCents", "100", ids),
-            BudgetVariable("Ai.UserDailyLimitCents", "80", ids),
-            BudgetVariable("Ai.UserDailyRequests", "3", ids),
-            BudgetVariable("Ai.ReservationCents", "35", ids));
-        await db.SaveChangesAsync();
+        await SetBudgetVariablesAsync(db, ids,
+            ("Ai.SpendCurrency", "AUD"),
+            ("Ai.DailyLimitCents", "100"),
+            ("Ai.UserDailyLimitCents", "80"),
+            ("Ai.UserDailyRequests", "3"),
+            ("Ai.ReservationCents", "35"));
 
         var first = await reservations.ReserveAsync(requestId, fingerprint, null, null, "Gemini", "text-model");
         Assert.Equal(first, await reservations.ReserveAsync(requestId, fingerprint, null, null, "Gemini", "text-model"));
@@ -286,13 +286,12 @@ public sealed class PersistenceAndLockingTests : IDisposable
         await new DatabaseSeeder(db, hasher, store, ids, NullLogger<DatabaseSeeder>.Instance).SeedAsync(true, null, null, null);
         var admin = await db.Users.SingleAsync(u => u.Email == DatabaseSeeder.DefaultDevSuperAdminEmail);
         _actor.SwitchTo(admin.Id, "Admin", "test");
-        db.ApplicationVariables.AddRange(
-            BudgetVariable("Ai.SpendCurrency", "AUD", ids),
-            BudgetVariable("Ai.DailyLimitCents", "100", ids),
-            BudgetVariable("Ai.UserDailyLimitCents", "100", ids),
-            BudgetVariable("Ai.UserDailyRequests", "3", ids),
-            BudgetVariable("Ai.ReservationCents", "35", ids));
-        await db.SaveChangesAsync();
+        await SetBudgetVariablesAsync(db, ids,
+            ("Ai.SpendCurrency", "AUD"),
+            ("Ai.DailyLimitCents", "100"),
+            ("Ai.UserDailyLimitCents", "100"),
+            ("Ai.UserDailyRequests", "3"),
+            ("Ai.ReservationCents", "35"));
         var authorization = new SupplierAiAuthorization(db, new AuthService(db, hasher));
         var reservations = new SupplierAiSpendReservations(db, _actor, new PermissionEvaluator(_actor), authorization, _time, ids);
         var fingerprint = new string('a', 64);
@@ -349,13 +348,12 @@ public sealed class PersistenceAndLockingTests : IDisposable
             seed.Users.Add(secondUser);
             seed.UserRoles.Add(new UserRoleEntity { Id = ids.NewId(), UserId = secondUser.Id, RoleId = fullRole.Id });
             secondActor.SwitchTo(secondUser.Id, "Second", "test");
-            seed.ApplicationVariables.AddRange(
-                BudgetVariable("Ai.SpendCurrency", "AUD", ids),
-                BudgetVariable("Ai.DailyLimitCents", "35", ids),
-                BudgetVariable("Ai.UserDailyLimitCents", "35", ids),
-                BudgetVariable("Ai.UserDailyRequests", "5", ids),
-                BudgetVariable("Ai.ReservationCents", "35", ids));
-            await seed.SaveChangesAsync();
+            await SetBudgetVariablesAsync(seed, ids,
+                ("Ai.SpendCurrency", "AUD"),
+                ("Ai.DailyLimitCents", "35"),
+                ("Ai.UserDailyLimitCents", "35"),
+                ("Ai.UserDailyRequests", "5"),
+                ("Ai.ReservationCents", "35"));
         }
 
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -386,6 +384,26 @@ public sealed class PersistenceAndLockingTests : IDisposable
 
     private static ApplicationVariableEntity BudgetVariable(string key, string value, IIdGenerator ids)
         => new() { Id = ids.NewId(), Key = key, Value = value };
+
+    private static async Task SetBudgetVariablesAsync(
+        LavariDbContext db,
+        IIdGenerator ids,
+        params (string Key, string Value)[] values)
+    {
+        foreach (var (key, value) in values)
+        {
+            var variable = await db.ApplicationVariables.SingleOrDefaultAsync(x => x.Key == key);
+            if (variable is null)
+            {
+                db.ApplicationVariables.Add(BudgetVariable(key, value, ids));
+            }
+            else
+            {
+                variable.Value = value;
+            }
+        }
+        await db.SaveChangesAsync();
+    }
 
     [Fact]
     public async Task MigrationsSeedingAuditAndSoftDelete_WorkAtomicallyWithoutLeakingSecrets()
@@ -483,6 +501,84 @@ public sealed class PersistenceAndLockingTests : IDisposable
         db.ChangeTracker.Clear();
 
         Assert.Null(await db.Clients.FirstOrDefaultAsync(c => c.Name == "Must Roll Back"));
+    }
+
+    [Fact]
+    public async Task DevelopmentClientSeeder_ReplacesDuplicateLegacyClientsAndPreservesTheirHistory()
+    {
+        await using var db = CreateDbContext();
+        await db.Database.MigrateAsync();
+
+        var legacyClients = Enumerable.Range(0, 11)
+            .Select(_ => new ClientEntity { Id = Guid.NewGuid(), Name = "Sydney Harbour Developments" })
+            .ToArray();
+        var legacyGroups = legacyClients
+            .Select(client => new JobGroupEntity
+            {
+                Id = Guid.NewGuid(),
+                ClientId = client.Id,
+                Name = "Waterfront Residences"
+            })
+            .ToArray();
+        var legacyJobs = legacyGroups
+            .Select((group, index) => new JobEntity
+            {
+                Id = Guid.NewGuid(),
+                ClientId = legacyClients[index].Id,
+                JobGroupId = group.Id,
+                Name = "Balmain Terrace Renovated"
+            })
+            .ToArray();
+        db.Clients.AddRange(legacyClients);
+        db.JobGroups.AddRange(legacyGroups);
+        db.Jobs.AddRange(legacyJobs);
+        await db.SaveChangesAsync();
+
+        var storage = new LocalPrivateFileStore(
+            Options.Create(new LavariStorageOptions { StorageRoot = _tempStorageDir }),
+            new TimeOrderedIdGenerator(_time),
+            _time);
+        var seeder = new DatabaseSeeder(
+            db,
+            new Pbkdf2PasswordHasher(),
+            storage,
+            new TimeOrderedIdGenerator(_time),
+            NullLogger<DatabaseSeeder>.Instance,
+            timeProvider: _time);
+
+        await seeder.SeedDevelopmentClientsAsync();
+
+        var clients = await db.Clients.OrderBy(client => client.Name).ToListAsync();
+        Assert.Equal(3, clients.Count);
+        Assert.Equal(3, clients.Select(client => client.Name).Distinct().Count());
+        Assert.Equal(9, await db.JobGroups.CountAsync());
+        Assert.Equal(27, await db.Jobs.CountAsync());
+
+        var aster = clients.Single(client => client.Name == "Aster Design Studio");
+        var harbourline = clients.Single(client => client.Name == "Harbourline Developments");
+        var northstar = clients.Single(client => client.Name == "Northstar Property Group");
+        Assert.Equal(1, await db.JobGroups.CountAsync(group => group.ClientId == aster.Id));
+        Assert.Equal(1, await db.Jobs.CountAsync(job => job.ClientId == aster.Id));
+        Assert.Equal(2, await db.JobGroups.CountAsync(group => group.ClientId == harbourline.Id));
+        Assert.Equal(2, await db.Jobs.CountAsync(job => job.ClientId == harbourline.Id));
+        Assert.Equal(6, await db.JobGroups.CountAsync(group => group.ClientId == northstar.Id));
+        Assert.Equal(24, await db.Jobs.CountAsync(job => job.ClientId == northstar.Id));
+
+        var activeGroups = await db.JobGroups.ToListAsync();
+        foreach (var group in activeGroups)
+        {
+            var expectedJobs = group.ClientId == northstar.Id ? 4 : 1;
+            Assert.Equal(expectedJobs, await db.Jobs.CountAsync(job => job.JobGroupId == group.Id));
+        }
+
+        Assert.Equal(11, await db.Clients.IgnoreQueryFilters().CountAsync(client => client.DeletedAtUtc != null));
+        Assert.Equal(11, await db.JobGroups.IgnoreQueryFilters().CountAsync(group => group.DeletedAtUtc != null));
+        Assert.Equal(11, await db.Jobs.IgnoreQueryFilters().CountAsync(job => job.DeletedAtUtc != null));
+        Assert.Equal(33, await db.AuditEntries.CountAsync(entry => entry.Operation == "SoftDelete"));
+
+        var auditCount = await db.AuditEntries.CountAsync();
+        await seeder.SeedDevelopmentClientsAsync();
+        Assert.Equal(auditCount, await db.AuditEntries.CountAsync());
     }
 
     [Fact]

@@ -11,6 +11,120 @@ let integrationStatus = null;
 let busy = false;
 let initialized = false;
 let saveChain = Promise.resolve();
+let attributes = [];
+
+function attributeKey(label) {
+  const key = label.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80).replace(/-+$/g, '');
+  return key || 'attribute';
+}
+
+function attributeValues() {
+  return attributes.map(attribute => ({ ...attribute }));
+}
+
+function setAttributes(values) {
+  const container = $('attributes');
+  container.replaceChildren();
+  attributes = Array.isArray(values) ? values.slice(0, 25).map((value, index) => {
+    const label = typeof value?.label === 'string' ? value.label.slice(0, 100) : '';
+    return {
+      key: typeof value?.key === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(value.key)
+        ? value.key : attributeKey(label || `attribute-${index + 1}`),
+      label,
+      value: typeof value?.value === 'string' ? value.value.slice(0, 500) : '',
+      valueType: ['text', 'number', 'url', 'date'].includes(value?.valueType) ? value.valueType : 'text',
+      unit: typeof value?.unit === 'string' ? value.unit.slice(0, 40) : ''
+    };
+  }) : [];
+
+  for (const attribute of attributes) {
+    const row = document.createElement('div');
+    row.className = 'attribute-row';
+    const makeInput = (labelText, property, type = 'text') => {
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = type;
+      input.value = attribute[property];
+      input.maxLength = property === 'value' ? 500 : property === 'unit' ? 40 : 100;
+      input.addEventListener('input', () => {
+        attribute[property] = input.value;
+        if (property === 'label') attribute.key = attributeKey(input.value);
+      });
+      label.append(input);
+      row.append(label);
+      return input;
+    };
+
+    makeInput('Attribute label', 'label');
+    const valueInput = makeInput('Value', 'value');
+    valueInput.type = attribute.valueType === 'number' ? 'number' :
+      attribute.valueType === 'url' ? 'url' : attribute.valueType === 'date' ? 'date' : 'text';
+    if (valueInput.type === 'number') valueInput.step = 'any';
+    const typeLabel = document.createElement('label');
+    typeLabel.textContent = 'Value type';
+    const typeSelect = document.createElement('select');
+    for (const [value, text] of [['text', 'Text'], ['number', 'Number'], ['url', 'URL'], ['date', 'Date']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      typeSelect.append(option);
+    }
+    typeSelect.value = attribute.valueType;
+    typeSelect.addEventListener('change', () => {
+      attribute.valueType = typeSelect.value;
+      valueInput.type = attribute.valueType === 'number' ? 'number' :
+        attribute.valueType === 'url' ? 'url' : attribute.valueType === 'date' ? 'date' : 'text';
+    });
+    typeLabel.append(typeSelect);
+    row.append(typeLabel);
+    makeInput('Unit (optional)', 'unit');
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      attributes = attributes.filter(item => item !== attribute);
+      setAttributes(attributes);
+      updateButtons();
+      persist().catch(() => message('The draft could not be preserved in this browser session.', true));
+    });
+    row.append(remove);
+    container.append(row);
+  }
+}
+
+function setFieldValue(id, value) {
+  if (id === 'attributes') {
+    if (Array.isArray(value)) {
+      setAttributes(value);
+    } else if (typeof value === 'string' && value.trim()) {
+      setAttributes(LavariExtensionCore.parseAttributes(value).map(attribute => ({
+        ...attribute, valueType: 'text'
+      })));
+    } else {
+      setAttributes([]);
+    }
+  }
+  else $(id).value = value ?? '';
+}
+
+function fieldValue(id) {
+  return id === 'attributes' ? attributeValues() : $(id).value;
+}
+
+function lineItemAttributes() {
+  const seen = new Set();
+  return attributes.filter(attribute => attribute.label.trim() || attribute.value.trim()).map(attribute => {
+    const label = attribute.label.trim();
+    const key = /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(attribute.key)
+      ? attribute.key : attributeKey(label);
+    const value = attribute.value.trim();
+    if (!label || !value || seen.has(key)) throw new Error('Each attribute needs a unique label and value.');
+    seen.add(key);
+    return { key, label, value, valueType: attribute.valueType, unit: attribute.unit.trim() || null };
+  });
+}
 
 function message(text, isError = false) {
   $('error').hidden = !isError;
@@ -43,14 +157,14 @@ function updateButtons() {
   $('save').disabled = busy || !initialized || !allowed || !state.clientId || !state.jobId ||
     !$('title').value.trim() || !$('line-form').checkValidity() || state.pendingSave;
   $('analyze').disabled = busy || !can('supplier_capture', 2) || !state.jobId ||
-    !$('page-text').value.trim() || !$('source').value.trim() || !$('consent').checked ||
+    !$('source').value.trim() || !$('consent').checked ||
     ($('use-gemini').checked && (!canExtract || !$('provider-consent').checked));
   $('uncertain').hidden = !state.pendingSave;
   for (const id of ['connect', 'find-clients', 'find-jobs', 'capture', 'discard']) $(id).disabled = busy || !initialized;
 }
 
 function snapshot() {
-  return { ...state, values: Object.fromEntries(fields.map(id => [id, $(id).value])) };
+  return { ...state, values: Object.fromEntries(fields.map(id => [id, fieldValue(id)])) };
 }
 
 function persist() {
@@ -206,6 +320,103 @@ async function searchJobs() {
   message(`${data.totalCount} matching jobs. Select a job.`);
 }
 
+function captureSupplierPage(expectedOrigin) {
+  const maxLength = 16000;
+  const maxNodes = 20000;
+  const maxDepth = 64;
+  const excluded = new Set([
+    'script', 'style', 'noscript', 'svg', 'iframe', 'object', 'embed', 'template',
+    'form', 'input', 'select', 'textarea', 'button', 'option', 'nav', 'header',
+    'footer', 'aside', 'dialog', 'meta', 'link', 'canvas'
+  ]);
+  const excludedRoles = new Set(['navigation', 'banner', 'contentinfo', 'complementary', 'dialog', 'search']);
+  const allowed = new Set([
+    'main', 'article', 'section', 'div', 'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'span', 'strong', 'b', 'em', 'i', 'small', 'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'img'
+  ]);
+  const block = new Set([
+    'main', 'article', 'section', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'table', 'tr', 'br'
+  ]);
+  const cleanUrl = value => {
+    let url;
+    try { url = new URL(value, location.href); } catch { return null; }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    url.hash = '';
+    for (const key of [...url.searchParams.keys()]) {
+      const normalized = key.toLowerCase().replace(/[-_.]/g, '');
+      if (['key', 'apikey', 'code'].includes(normalized) ||
+          ['token', 'auth', 'signature', 'secret', 'password', 'session', 'cookie', 'credential']
+            .some(fragment => normalized.includes(fragment))) {
+        url.searchParams.delete(key);
+      }
+    }
+    return url.href;
+  };
+  const sourceUrl = cleanUrl(location.href);
+  if (!sourceUrl) throw new Error('Capture is available only on public HTTP(S) supplier pages.');
+  if (new URL(sourceUrl).origin === expectedOrigin) {
+    throw new Error('Capture a supplier page, not a Lavari page.');
+  }
+  const parts = [];
+  let length = 0;
+  let visited = 0;
+  const append = value => {
+    if (length >= maxLength) return false;
+    const remaining = maxLength - length;
+    parts.push(value.slice(0, remaining));
+    length += Math.min(value.length, remaining);
+    return value.length <= remaining;
+  };
+  const escapeText = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escapeAttribute = value => escapeText(value).replace(/"/g, '&quot;');
+  const visit = (node, depth) => {
+    if (length >= maxLength || visited++ >= maxNodes || depth > maxDepth) return;
+    if (node.nodeType === 3) {
+      const text = node.nodeValue?.replace(/\s+/g, ' ').trim();
+      if (text) append(escapeText(text) + ' ');
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = node.tagName.toLowerCase();
+    if (excluded.has(tag) || node.hidden || node.hasAttribute('hidden') ||
+        node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' ||
+        excludedRoles.has(node.getAttribute('role')) ||
+        node.hasAttribute('contenteditable') || node.getAttribute('type')?.toLowerCase() === 'password') return;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' ||
+        Number(style.opacity) === 0) return;
+
+    if (tag === 'img') {
+      const src = cleanUrl(node.getAttribute('src') || '');
+      if (src) {
+        const alt = node.getAttribute('alt') || '';
+        append(`<img src="${escapeAttribute(src)}"${alt ? ` alt="${escapeAttribute(alt)}"` : ''}>`);
+      }
+      return;
+    }
+
+    const outputTag = allowed.has(tag) ? tag : null;
+    if (block.has(tag)) append('<br>');
+    if (outputTag) append(`<${outputTag}>`);
+    for (const child of node.childNodes) {
+      if (visited >= maxNodes || length >= maxLength) break;
+      visit(child, depth + 1);
+    }
+    if (outputTag && tag !== 'br') append(`</${outputTag}>`);
+  };
+
+  visit(document.body, 0);
+  let html = parts.join('').trim();
+  if (!html) throw new Error('No visible product content was found on this page.');
+  if (html.length === maxLength) {
+    const boundary = html.lastIndexOf('>');
+    if (boundary > 0) html = html.slice(0, boundary + 1);
+  }
+  return { url: sourceUrl, html };
+}
+
 async function operation(work) {
   if (busy) return;
   await setBusy(true);
@@ -262,22 +473,21 @@ $('job').addEventListener('change', () => {
 $('capture').addEventListener('click', () => operation(async () => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
-  if (!tab?.id) throw new Error('Open a supplier page and select some product text first.');
+  if (!tab?.id) throw new Error('Open a supplier product page before capturing.');
   const result = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => ({ text: String(window.getSelection()), url: location.href })
+    func: captureSupplierPage,
+    args: [API_ORIGIN]
   });
   const captured = result[0]?.result;
-  if (!captured?.text.trim()) throw new Error('Select product text on the supplier page before capturing.');
-  if (captured.text.length > 16000) throw new Error('Select no more than 16,000 characters.');
-  const url = new URL(captured.url);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Capture is available only on HTTP(S) pages.');
-  url.username = ''; url.password = ''; url.search = ''; url.hash = '';
-  $('source').value = url.href;
-  $('page-text').value = captured.text;
+  if (!captured?.html || captured.html.length > 16000) {
+    throw new Error('The visible product content could not be captured within the supported size.');
+  }
+  $('source').value = captured.url;
+  $('page-text').value = captured.html;
   $('consent').checked = false;
   $('provider-consent').checked = false;
-  message('Review the selected text and source URL before sending.');
+  message('Review the captured page HTML and source URL before sending.');
 }));
 
 function applySuggestion(draft) {
@@ -288,10 +498,31 @@ function applySuggestion(draft) {
   if (!$('description').value.trim() && typeof extracted.description === 'string') {
     $('description').value = extracted.description;
   }
-  if (!$('attributes').value.trim() && Array.isArray(extracted.attributes)) {
-    $('attributes').value = extracted.attributes
-      .filter(item => typeof item?.label === 'string' && typeof item?.value === 'string')
-      .map(item => `${item.label} | ${item.value}`).join('\n');
+  const suggestedAttributes = [
+    ...(Array.isArray(extracted.attributes) ? extracted.attributes : []),
+    ...(Array.isArray(extracted.identifiers) ? extracted.identifiers : []),
+    ...(Array.isArray(extracted.customFields) ? extracted.customFields : [])
+  ];
+  if (typeof extracted.sku === 'string' && extracted.sku.trim()) {
+    suggestedAttributes.unshift({ key: 'sku', label: 'SKU', value: extracted.sku, valueType: 'text' });
+  }
+  if (suggestedAttributes.length) {
+    const merged = [...attributeValues(), ...suggestedAttributes
+      .filter(item => typeof item?.label === 'string' && typeof item?.value === 'string')]
+      .reduce((all, item) => {
+        const label = item.label.trim();
+        const key = typeof item.key === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(item.key)
+          ? item.key : attributeKey(label);
+        if (label && item.value.trim() && !all.some(saved => saved.key.toLowerCase() === key.toLowerCase())) {
+          all.push({
+            key, label, value: item.value.trim(),
+            valueType: ['text', 'number', 'url', 'date'].includes(item.valueType) ? item.valueType : 'text',
+            unit: typeof item.unit === 'string' ? item.unit : ''
+          });
+        }
+        return all;
+      }, []);
+    setAttributes(merged.slice(0, 25));
   }
   const selectedCurrency = $('currency').value.trim().toUpperCase();
   let currencyWarning = '';
@@ -304,13 +535,6 @@ function applySuggestion(draft) {
   }
   if (!$('notes').value.trim()) {
     const references = [];
-    if (Array.isArray(extracted.identifiers)) {
-      for (const item of extracted.identifiers) {
-        if (typeof item?.label === 'string' && typeof item?.value === 'string') {
-          references.push(`${item.label}: ${item.value}`);
-        }
-      }
-    }
     if (Array.isArray(extracted.imageUrls)) {
       references.push(...extracted.imageUrls
         .filter(url => typeof url === 'string')
@@ -327,7 +551,7 @@ $('analyze').addEventListener('click', () => operation(async () => {
   if (!$('consent').checked) throw new Error('Review and confirm the content before sending.');
   const useGemini = $('use-gemini').checked;
   if (useGemini && !$('provider-consent').checked) {
-    throw new Error('Confirm that you consent to send the selected content to Google Gemini.');
+    throw new Error('Confirm that you consent to send the captured page content to Google Gemini.');
   }
   const draft = await api('/api/integrations/supplier-capture', 'POST', {
     clientId: state.clientId, jobId: state.jobId, sourceUrl: LavariExtensionCore.sourceUrl($('source').value),
@@ -346,7 +570,7 @@ function lineItem() {
   return {
     clientId: state.clientId, title: $('title').value.trim(), sourceUrl: LavariExtensionCore.sourceUrl($('source').value),
     description: $('description').value.trim() || null, roomOrArea: $('room').value.trim() || null,
-    selectedAttributes: LavariExtensionCore.parseAttributes($('attributes').value),
+    selectedAttributes: lineItemAttributes(),
     requirementsNote: $('requirements').value.trim() || null,
     quantityMilli: LavariExtensionCore.scaledInteger($('quantity').value, 3, 'Quantity', true),
     unit: $('unit').value.trim(), currency,
@@ -378,7 +602,7 @@ $('line-form').addEventListener('submit', event => {
       await api(`/api/jobs/${encodeURIComponent(state.jobId)}/line-items`, 'POST', { ...item, ...action });
       saved = true;
       state.pendingSave = false;
-      for (const id of fields.slice(2)) $(id).value = defaults[id] || '';
+      for (const id of fields.slice(2)) setFieldValue(id, defaults[id] || '');
       $('consent').checked = false;
       $('provider-consent').checked = false;
       $('use-gemini').checked = false;
@@ -408,9 +632,16 @@ $('acknowledge').addEventListener('click', () => {
   updateButtons();
   persist().catch(() => message('The draft could not be preserved in this browser session.', true));
 });
+$('add-attribute').addEventListener('click', () => {
+  if (attributes.length >= 25) return message('A line item can contain at most 25 attributes.', true);
+  attributes = [...attributes, { key: 'attribute', label: '', value: '', valueType: 'text', unit: '' }];
+  setAttributes(attributes);
+  updateButtons();
+  persist().catch(() => message('The draft could not be preserved in this browser session.', true));
+});
 $('discard').addEventListener('click', () => operation(async () => {
   if (!confirm('Discard the current draft?')) return;
-  for (const id of fields.slice(2)) $(id).value = defaults[id] || '';
+  for (const id of fields.slice(2)) setFieldValue(id, defaults[id] || '');
   $('consent').checked = false;
   $('provider-consent').checked = false;
   $('use-gemini').checked = false;
@@ -435,6 +666,9 @@ $('use-gemini').addEventListener('change', () => {
   updateButtons();
 });
 $('provider-consent').addEventListener('change', updateButtons);
+$('attributes').addEventListener('change', () => {
+  if (initialized) persist().catch(() => message('The draft could not be preserved in this browser session.', true));
+});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (session) setTimeout(() => applyTheme(), 150);
 });
@@ -447,7 +681,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       state = { ...state, ...saved };
     }
     if (!state.session) state.session = `extension-${crypto.randomUUID()}`;
-    for (const id of fields) $(id).value = state.values?.[id] ?? defaults[id] ?? '';
+    for (const id of fields) setFieldValue(id, state.values?.[id] ?? defaults[id] ?? '');
     renderSelect('client', state.clients, state.clientId, 'Select a client');
     renderSelect('job', state.jobs, state.jobId, 'Select a job');
     initialized = true;
